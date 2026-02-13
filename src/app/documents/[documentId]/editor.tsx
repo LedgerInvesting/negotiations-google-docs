@@ -28,6 +28,7 @@ import Link from "@tiptap/extension-link";
 import { useEditorStore } from "@/store/use-editor-store";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
+import { Comment } from "@/extensions/comment";
 import { Ruler } from "./ruler";
 import { Threads } from "./threads";
 import { LEFT_MARGIN_DEFAULT, RIGHT_MARGIN_DEFAULT } from "@/constants/margins";
@@ -154,6 +155,7 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
         multicolor: true,
       }),
       TaskItem.configure({ nested: true }),
+      Comment,
     ],
   });
 
