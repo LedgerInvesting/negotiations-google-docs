@@ -1,6 +1,5 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketServer, Socket } from 'socket.io';
-import { getAuth } from '@clerk/express';
 
 interface UserInfo {
   id: string;
@@ -16,7 +15,7 @@ interface RoomUser extends UserInfo {
 interface DocumentRooms {
   [roomId: string]: {
     users: Map<string, RoomUser>;
-    content: any;
+    content: string | null;
   };
 }
 
@@ -67,7 +66,7 @@ export function setupWebSocket(httpServer: HTTPServer) {
     });
 
     // Handle document updates
-    socket.on('document-update', ({ roomId, content }: { roomId: string; content: any }) => {
+    socket.on('document-update', ({ roomId, content }: { roomId: string; content: string }) => {
       if (rooms[roomId]) {
         rooms[roomId].content = content;
         // Broadcast to all other users in the room
@@ -89,8 +88,28 @@ export function setupWebSocket(httpServer: HTTPServer) {
       }
     });
 
+    // Handle selection updates (cursor position)
+    socket.on('selection-update', ({ roomId, selection, userName, userColor }: { 
+      roomId: string; 
+      selection: { from: number; to: number };
+      userName: string;
+      userColor: string;
+    }) => {
+      if (rooms[roomId] && rooms[roomId].users.has(socket.id)) {
+        const user = rooms[roomId].users.get(socket.id)!;
+        
+        // Broadcast selection position to others with user info
+        socket.to(roomId).emit('selection-update', {
+          userId: user.id,
+          userName,
+          userColor,
+          selection,
+        });
+      }
+    });
+
     // Handle awareness updates (selection, focus, etc.)
-    socket.on('awareness-update', ({ roomId, awareness }: { roomId: string; awareness: any }) => {
+    socket.on('awareness-update', ({ roomId, awareness }: { roomId: string; awareness: unknown }) => {
       socket.to(roomId).emit('awareness-update', {
         socketId: socket.id,
         awareness,
