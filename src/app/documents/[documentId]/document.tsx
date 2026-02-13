@@ -1,19 +1,32 @@
 "use client";
 
-import { Preloaded, usePreloadedQuery } from "convex/react";
-
 import { Room } from "./room";
 import { Editor } from "./editor";
 import { Navbar } from "./navbar";
 import { Toolbar } from "./toolbar";
-import { api } from "../../../../convex/_generated/api";
+import { useDocument } from "@/hooks/use-documents";
+import { FullscreenLoader } from "@/components/fullscreen-loader";
 
 interface DocumentProps {
-  preloadedDocument: Preloaded<typeof api.documents.getById>;
+  documentId: number;
 }
 
-export const Document = ({ preloadedDocument }: DocumentProps) => {
-  const document = usePreloadedQuery(preloadedDocument);
+export const Document = ({ documentId }: DocumentProps) => {
+  const { document, loading, error } = useDocument(documentId);
+
+  if (loading) {
+    return <FullscreenLoader label="Loading document..." />;
+  }
+
+  if (error || !document) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-red-500">
+          {error ? error.message : "Document not found"}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Room>
@@ -23,7 +36,10 @@ export const Document = ({ preloadedDocument }: DocumentProps) => {
           <Toolbar />
         </div>
         <div className="pt-[114px] print:pt-0">
-          <Editor initialContent={document.initialContent} />
+          <Editor 
+            initialContent={document.content || document.initial_content} 
+            documentId={documentId}
+          />
         </div>
       </div>
     </Room>

@@ -25,40 +25,58 @@ import TextAlign from "@tiptap/extension-text-align";
 
 import Link from "@tiptap/extension-link";
 
-import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
-import { useStorage } from "@liveblocks/react";
-
 import { useEditorStore } from "@/store/use-editor-store";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { Ruler } from "./ruler";
 import { Threads } from "./threads";
 import { LEFT_MARGIN_DEFAULT, RIGHT_MARGIN_DEFAULT } from "@/constants/margins";
+import { useDebounce } from "@/hooks/use-debounce";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
+import { useRef } from "react";
 
 interface EditorProps {
   initialContent?: string | undefined;
+  documentId: number;
 }
 
-export const Editor = ({ initialContent }: EditorProps) => {
-  const leftMargin = useStorage((root) => root.leftMargin) ?? LEFT_MARGIN_DEFAULT;
-  const rightMargin = useStorage((root) => root.rightMargin) ?? RIGHT_MARGIN_DEFAULT;
+export const Editor = ({ initialContent, documentId }: EditorProps) => {
+  const { getToken } = useAuth();
+  const isInitialContentSet = useRef(false);
+  const leftMargin = LEFT_MARGIN_DEFAULT;
+  const rightMargin = RIGHT_MARGIN_DEFAULT;
 
-  const liveblocks = useLiveblocksExtension({
-    initialContent,
-    offlineSupport_experimental: true,
-  });
   const { setEditor } = useEditorStore();
+
+  const debouncedSaveContent = useDebounce(async (content: string) => {
+    try {
+      const token = await getToken();
+      await apiClient.updateDocument(token, documentId, { content });
+      console.log('Content saved successfully');
+    } catch (error) {
+      console.error('Failed to save content:', error);
+    }
+  }, 1000);
 
   const editor = useEditor({
     immediatelyRender: false,
     onCreate({ editor }) {
       setEditor(editor);
+      // Set initial content if available
+      if (initialContent && !isInitialContentSet.current) {
+        editor.commands.setContent(initialContent);
+        isInitialContentSet.current = true;
+      }
     },
     onDestroy() {
       setEditor(null);
     },
     onUpdate({ editor }) {
       setEditor(editor);
+      // Auto-save content changes
+      const content = editor.getHTML();
+      debouncedSaveContent(content);
     },
     onSelectionUpdate({ editor }) {
       setEditor(editor);
@@ -83,10 +101,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
       },
     },
     extensions: [
-      liveblocks,
-      StarterKit.configure({
-        history: false,
-      }),
+      StarterKit,
       Table,
       TableCell,
       TableHeader,
@@ -123,7 +138,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
       <Ruler />
       <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0">
         <EditorContent editor={editor} />
-        <Threads editor={editor} />
+        <Threads />
       </div>
     </div>
   );
