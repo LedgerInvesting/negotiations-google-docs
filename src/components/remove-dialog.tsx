@@ -2,7 +2,9 @@
 
 import { toast } from "sonner";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useAuth } from "@clerk/nextjs";
+import { apiClient } from "@/lib/api-client";
+import { useRouter } from "next/navigation";
 
 import {
   AlertDialog,
@@ -16,17 +18,29 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-import { Id } from "../../convex/_generated/dataModel";
-import { api } from "../../convex/_generated/api";
-
 interface RemoveDialogProps {
-  documentId: Id<"documents">;
+  documentId: number;
   children: React.ReactNode;
 }
 
 export const RemoveDialog = ({ documentId, children }: RemoveDialogProps) => {
-  const remove = useMutation(api.documents.removeById);
+  const { getToken } = useAuth();
+  const router = useRouter();
   const [isRemoving, setIsRemoving] = useState(false);
+
+  const handleRemove = async () => {
+    setIsRemoving(true);
+    try {
+      const token = await getToken();
+      await apiClient.deleteDocument(token, documentId);
+      toast.success("Document removed");
+      router.refresh();
+    } catch (error) {
+      toast.error("Something went wrong");
+    } finally {
+      setIsRemoving(false);
+    }
+  };
 
   return (
     <AlertDialog>
@@ -35,7 +49,7 @@ export const RemoveDialog = ({ documentId, children }: RemoveDialogProps) => {
         <AlertDialogHeader>
           <AlertDialogTitle>Are you sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This action cannot be undone. This will permamently delete your document.
+            This action cannot be undone. This will permanently delete your document.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -44,13 +58,7 @@ export const RemoveDialog = ({ documentId, children }: RemoveDialogProps) => {
             disabled={isRemoving}
             onClick={(e) => {
               e.stopPropagation();
-              setIsRemoving(false);
-              remove({ id: documentId })
-                .catch(() => toast.error("Something went wrong"))
-                .then(() => {
-                  toast.success("Document removed");
-                })
-                .finally(() => setIsRemoving(false));
+              handleRemove();
             }}
           >
             Delete

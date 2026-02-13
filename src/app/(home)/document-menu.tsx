@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ExternalLinkIcon, FilePenIcon, MoreVertical, TrashIcon } from "lucide-react";
 import { RemoveDialog } from "@/components/remove-dialog";
-import { Id } from "../../../convex/_generated/dataModel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,9 +10,9 @@ import {
 import { RenameDialog } from "@/components/rename-dialog";
 
 interface DocumentMenuProps {
-  documentId: Id<"documents">;
+  documentId: number;
   title: string;
-  onNewTab: (id: Id<"documents">) => void;
+  onNewTab: (id: number) => void;
 }
 
 export const DocumentMenu = ({ documentId, title, onNewTab }: DocumentMenuProps) => {

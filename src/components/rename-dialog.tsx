@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
-
-import { Id } from "../../convex/_generated/dataModel";
-import { api } from "../../convex/_generated/api";
+import { useAuth } from "@clerk/nextjs";
+import { apiClient } from "@/lib/api-client";
 import {
   Dialog,
   DialogContent,
@@ -17,31 +15,38 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 
 interface RenameDialogProps {
-  documentId: Id<"documents">;
+  documentId: number;
   initialTitle: string;
   children: React.ReactNode;
 }
 
 export const RenameDialog = ({ documentId, initialTitle, children }: RenameDialogProps) => {
-  const update = useMutation(api.documents.updateById);
+  const { getToken } = useAuth();
+  const router = useRouter();
   const [isUpdating, setIsUpdating] = useState(false);
-
   const [title, setTitle] = useState(initialTitle);
   const [open, setOpen] = useState(false);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsUpdating(true);
 
-    update({ id: documentId, title: title.trim() || "Untitled" })
-      .catch(() => toast.error("Something went wrong"))
-      .then(() => toast.success("Document renamed"))
-      .finally(() => {
-        setIsUpdating(false);
-        setOpen(false);
+    try {
+      const token = await getToken();
+      await apiClient.updateDocument(token, documentId, { 
+        title: title.trim() || "Untitled" 
       });
+      toast.success("Document renamed");
+      router.refresh();
+      setOpen(false);
+    } catch (error) {
+      toast.error("Something went wrong");
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   return (

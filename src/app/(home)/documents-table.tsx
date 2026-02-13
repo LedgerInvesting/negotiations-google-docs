@@ -1,6 +1,5 @@
 import { LoaderIcon } from "lucide-react";
-import { PaginationStatus } from "convex/react";
-import { Doc } from "../../../convex/_generated/dataModel";
+import { Document } from "@/lib/api-client";
 import {
   Table,
   TableBody,
@@ -12,8 +11,10 @@ import {
 import { DocumentRow } from "./document-row";
 import { Button } from "@/components/ui/button";
 
+type PaginationStatus = 'LoadingFirstPage' | 'CanLoadMore' | 'LoadingMore' | 'Exhausted';
+
 interface DocumentsTableProps {
-  documents: Doc<"documents">[] | undefined;
+  documents: Document[] | undefined;
   loadMore: (numItems: number) => void;
   status: PaginationStatus;
 }
@@ -46,7 +47,7 @@ export const DocumentsTable = ({ documents, loadMore, status }: DocumentsTablePr
           ) : (
             <TableBody>
               {documents.map((document) => (
-                <DocumentRow key={document._id} document={document} />
+                <DocumentRow key={document.id} document={document} />
               ))}
             </TableBody>
           )}

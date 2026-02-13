@@ -1,31 +1,18 @@
-import { auth } from "@clerk/nextjs/server";
-import { preloadQuery } from "convex/nextjs";
-
 import { Document } from "./document";
-import { Id } from "../../../../convex/_generated/dataModel";
-import { api } from "../../../../convex/_generated/api";
 
 interface DocumentIdPageProps {
-  params: Promise<{ documentId: Id<"documents"> }>;
+  params: Promise<{ documentId: string }>;
 }
 
 const DocumentIdPage = async ({ params }: DocumentIdPageProps) => {
   const { documentId } = await params;
+  const id = parseInt(documentId);
 
-  const { getToken } = await auth();
-  const token = (await getToken({ template: "convex" })) ?? undefined;
-
-  if (!token) {
-    throw new Error("Unauthorized");
+  if (isNaN(id)) {
+    throw new Error("Invalid document ID");
   }
 
-  const preloadedDocument = await preloadQuery(
-    api.documents.getById,
-    { id: documentId },
-    { token }
-  );
-
-  return <Document preloadedDocument={preloadedDocument} />;
+  return <Document documentId={id} />;
 };
 
 export default DocumentIdPage;

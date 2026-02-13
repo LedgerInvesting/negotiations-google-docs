@@ -1,53 +1,56 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { BsCloudCheck, BsCloudSlash } from "react-icons/bs";
-
-import { useMutation } from "convex/react";
-import { useStatus } from "@liveblocks/react";
+import { BsCloudCheck } from "react-icons/bs";
 import { useDebounce } from "@/hooks/use-debounce";
-
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
 import { toast } from "sonner";
 import { LoaderIcon } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
+import { apiClient } from "@/lib/api-client";
 
 interface DocumentInputProps {
   title: string;
-  id: Id<"documents">;
+  id: number;
 }
 
 export const DocumentInput = ({ title, id }: DocumentInputProps) => {
-  const status = useStatus();
+  const { getToken } = useAuth();
 
   const [value, setValue] = useState(title);
   const [isPending, setIsPending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const mutate = useMutation(api.documents.updateById);
 
-  const debouncedUpdate = useDebounce((newValue: string) => {
+  const debouncedUpdate = useDebounce(async (newValue: string) => {
     if (newValue === title) return;
 
     setIsPending(true);
-    mutate({ id, title: newValue })
-      .then(() => toast.success("Document updated"))
-      .catch(() => toast.error("Sometimes went wrong"))
-      .finally(() => setIsPending(false));
+    try {
+      const token = await getToken();
+      await apiClient.updateDocument(token, id, { title: newValue });
+      toast.success("Document updated");
+    } catch (error) {
+      toast.error("Something went wrong");
+    } finally {
+      setIsPending(false);
+    }
   });
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     setIsPending(true);
-    mutate({ id, title: value })
-      .then(() => {
-        toast.success("Document updated");
-        setIsEditing(false);
-      })
-      .catch(() => toast.error("Sometimes went wrong"))
-      .finally(() => setIsPending(false));
+    try {
+      const token = await getToken();
+      await apiClient.updateDocument(token, id, { title: value });
+      toast.success("Document updated");
+      setIsEditing(false);
+    } catch (error) {
+      toast.error("Something went wrong");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -56,8 +59,7 @@ export const DocumentInput = ({ title, id }: DocumentInputProps) => {
     debouncedUpdate(newValue);
   };
 
-  const showLoader = isPending || status === "connecting" || status === "reconnecting";
-  const showError = status === "disconnected";
+  const showLoader = isPending;
 
   return (
     <div className="flex items-center gap-2">
@@ -85,8 +87,7 @@ export const DocumentInput = ({ title, id }: DocumentInputProps) => {
           {title}
         </span>
       )}
-      {showError && <BsCloudSlash className="size-4" />}
-      {!showError && !showLoader && <BsCloudCheck className="size-4" />}
+      {!showLoader && <BsCloudCheck className="size-4" />}
       {showLoader && <LoaderIcon className="size-4 animate-spin text-muted-foreground" />}
     </div>
   );

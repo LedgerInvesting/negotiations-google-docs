@@ -45,31 +45,33 @@ import { DocumentInput } from "./document-input";
 import { useEditorStore } from "@/store/use-editor-store";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Inbox } from "./inbox";
-import { Doc } from "../../../../convex/_generated/dataModel";
-import { useMutation } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
+import { Document } from "@/lib/api-client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useAuth } from "@clerk/nextjs";
+import { apiClient } from "@/lib/api-client";
 
 interface NavbarProps {
-  data: Doc<"documents">;
+  data: Document;
 }
 
 export const Navbar = ({ data }: NavbarProps) => {
   const router = useRouter();
   const { editor } = useEditorStore();
+  const { getToken } = useAuth();
 
-  const mutation = useMutation(api.documents.create);
-  const onNewDocument = () => {
-    mutation({
-      title: "Untitled Document",
-      initialContent: "",
-    })
-      .catch(() => toast.error("Something went wrong"))
-      .then((id) => {
-        toast.success("Document created");
-        router.push(`/documents/${id}`);
+  const onNewDocument = async () => {
+    try {
+      const token = await getToken();
+      const document = await apiClient.createDocument(token, {
+        title: "Untitled Document",
+        initialContent: "",
       });
+      toast.success("Document created");
+      router.push(`/documents/${document.id}`);
+    } catch (error) {
+      toast.error("Something went wrong");
+    }
   };
 
   const insertTable = ({ rows, cols }: { rows: number; cols: number }) => {
@@ -121,7 +123,7 @@ export const Navbar = ({ data }: NavbarProps) => {
           <Image src={"/logo.svg"} alt="logo" width={36} height={36} />
         </Link>
         <div className="flex flex-col">
-          <DocumentInput title={data.title} id={data._id} />
+          <DocumentInput title={data.title} id={data.id} />
           <div className="flex">
             <Menubar className="border-none bg-transparent shadow-none h-auto p-0">
               <MenubarMenu>
@@ -157,7 +159,7 @@ export const Navbar = ({ data }: NavbarProps) => {
                     New Document
                   </MenubarItem>
                   <MenubarSeparator />
-                  <RenameDialog documentId={data._id} initialTitle={data.title}>
+                  <RenameDialog documentId={data.id} initialTitle={data.title}>
                     <MenubarItem
                       onClick={(e) => e.stopPropagation()}
                       onSelect={(e) => e.preventDefault()}

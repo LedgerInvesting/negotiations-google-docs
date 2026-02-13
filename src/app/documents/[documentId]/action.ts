@@ -1,14 +1,27 @@
 "use server";
 
-import { ConvexHttpClient } from "convex/browser";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { Id } from "../../../../convex/_generated/dataModel";
-import { api } from "../../../../convex/_generated/api";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export async function getDocuments(ids: Id<"documents">[]) {
-  return await convex.query(api.documents.getByIds, { ids });
+export async function getDocuments(ids: number[]) {
+  const { getToken } = await auth();
+  const token = await getToken();
+  
+  const response = await fetch(`${API_URL}/api/documents/by-ids`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : '',
+    },
+    body: JSON.stringify({ ids }),
+  });
+
+  if (!response.ok) {
+    return [];
+  }
+
+  return await response.json();
 }
 
 export async function getUsers() {
