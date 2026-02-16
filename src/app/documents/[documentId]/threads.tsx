@@ -524,7 +524,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
   }
 
   return (
-    <div className="absolute right-0 top-0 w-80 p-4 space-y-4 max-h-screen overflow-y-auto">
+    <div className="w-80 space-y-4 flex-shrink-0 max-h-[calc(100vh-8rem)] overflow-y-auto sticky top-4">
       {/* Active comment input */}
       {activeCommentId && (
         <Card className="p-4 shadow-lg border-2 border-blue-500">

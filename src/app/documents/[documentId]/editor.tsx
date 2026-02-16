@@ -187,19 +187,23 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
 
   return (
     <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible">
-      <Ruler />
-      <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0 relative">
-        <EditorContent editor={editor} />
+      <div className="min-w-max flex justify-center gap-4 mx-auto print:w-full print:min-w-0">
+        <div className="flex flex-col">
+          <Ruler />
+          <div className="relative py-4 print:py-0">
+            <EditorContent editor={editor} />
+            {/* Render remote cursors */}
+            {remoteSelections.map((selection) => (
+              <RemoteCursor
+                key={selection.userId}
+                name={selection.userName}
+                color={selection.userColor}
+                position={selection.selection}
+              />
+            ))}
+          </div>
+        </div>
         <Threads documentId={documentId} roomId={`document-${documentId}`} />
-        {/* Render remote cursors */}
-        {remoteSelections.map((selection) => (
-          <RemoteCursor
-            key={selection.userId}
-            name={selection.userName}
-            color={selection.userColor}
-            position={selection.selection}
-          />
-        ))}
       </div>
     </div>
   );
