@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { clerkMiddleware, requireAuth as clerkRequireAuth, getAuth } from '@clerk/express';
 
 export interface AuthRequest extends Request {
-  auth?: {
+  user?: {
     userId: string;
     orgId?: string;
   };
@@ -20,7 +20,8 @@ export const extractUserInfo = (req: AuthRequest, res: Response, next: NextFunct
       return res.status(401).json({ error: 'Unauthorized' });
     }
     
-    req.auth = {
+    // Store in req.user instead of req.auth to avoid conflict with Clerk's auth()
+    req.user = {
       userId: auth.userId,
       orgId: auth.orgId || undefined,
     };

@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { clerkMiddleware } from '@clerk/express';
 import { requireAuth, extractUserInfo } from './middleware/auth';
 import documentsRouter from './routes/documents';
+import commentsRouter from './routes/comments';
 import { setupWebSocket } from './websocket';
 
 dotenv.config();
@@ -31,6 +32,7 @@ app.get('/health', (req, res) => {
 
 // Protected routes
 app.use('/api/documents', requireAuth, extractUserInfo, documentsRouter);
+app.use('/api', requireAuth, extractUserInfo, commentsRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

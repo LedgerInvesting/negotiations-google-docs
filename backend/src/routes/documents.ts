@@ -32,8 +32,8 @@ const getByIdsSchema = z.object({
 router.get('/', async (req: AuthRequest, res) => {
   try {
     const { search, limit = '5', cursor = '0' } = getDocumentsSchema.parse(req.query);
-    const userId = req.auth!.userId;
-    const organizationId = req.auth!.orgId;
+    const userId = req.user!.userId;
+    const organizationId = req.user!.orgId;
 
     const result = await DocumentModel.getPaginated(
       userId,
@@ -58,8 +58,8 @@ router.get('/', async (req: AuthRequest, res) => {
 router.post('/', async (req: AuthRequest, res) => {
   try {
     const { title, initialContent } = createDocumentSchema.parse(req.body);
-    const userId = req.auth!.userId;
-    const organizationId = req.auth!.orgId;
+    const userId = req.user!.userId;
+    const organizationId = req.user!.orgId;
 
     const document = await DocumentModel.create({
       title,
@@ -127,8 +127,8 @@ router.patch('/:id', async (req: AuthRequest, res) => {
     }
 
     const { title, content } = updateDocumentSchema.parse(req.body);
-    const userId = req.auth!.userId;
-    const organizationId = req.auth!.orgId;
+    const userId = req.user!.userId;
+    const organizationId = req.user!.orgId;
 
     // Check access
     const hasAccess = await DocumentModel.checkAccess(documentId, userId, organizationId);
@@ -163,8 +163,8 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Invalid document ID' });
     }
 
-    const userId = req.auth!.userId;
-    const organizationId = req.auth!.orgId;
+    const userId = req.user!.userId;
+    const organizationId = req.user!.orgId;
 
     // Check access
     const hasAccess = await DocumentModel.checkAccess(documentId, userId, organizationId);

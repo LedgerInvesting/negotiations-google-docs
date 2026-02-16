@@ -16,6 +16,18 @@ export interface PaginationResult {
   continueCursor: string | null;
 }
 
+export interface Comment {
+  id: number;
+  comment_id: string;
+  document_id: number;
+  text: string;
+  author_id: string;
+  author_name: string;
+  parent_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 class ApiClient {
@@ -115,6 +127,63 @@ class ApiClient {
 
     if (!response.ok) {
       throw new Error('Failed to delete document');
+    }
+  }
+
+  // Comment methods
+  async getComments(token: string | null, documentId: number): Promise<{ comments: Comment[] }> {
+    const response = await fetch(`${API_URL}/api/documents/${documentId}/comments`, {
+      headers: await this.getAuthHeaders(token),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch comments');
+    }
+
+    return response.json();
+  }
+
+  async createComment(token: string | null, documentId: number, data: {
+    commentId: string;
+    text: string;
+    authorName: string;
+    parentId?: number | null;
+  }): Promise<{ comment: Comment }> {
+    const response = await fetch(`${API_URL}/api/documents/${documentId}/comments`, {
+      method: 'POST',
+      headers: await this.getAuthHeaders(token),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create comment');
+    }
+
+    return response.json();
+  }
+
+  async updateComment(token: string | null, commentId: string, text: string): Promise<{ comment: Comment }> {
+    const response = await fetch(`${API_URL}/api/comments/${commentId}`, {
+      method: 'PUT',
+      headers: await this.getAuthHeaders(token),
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to update comment');
+    }
+
+    return response.json();
+  }
+
+  async deleteComment(token: string | null, commentId: string): Promise<void> {
+    const response = await fetch(`${API_URL}/api/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: await this.getAuthHeaders(token),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete comment');
     }
   }
 }

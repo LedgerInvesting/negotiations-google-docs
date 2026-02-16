@@ -195,7 +195,7 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
       <Ruler />
       <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0 relative">
         <EditorContent editor={editor} />
-        <Threads />
+        <Threads documentId={documentId} roomId={`document-${documentId}`} />
         {/* Render remote cursors */}
         {remoteSelections.map((selection) => (
           <RemoteCursor

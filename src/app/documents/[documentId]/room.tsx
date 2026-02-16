@@ -4,7 +4,7 @@ import { ReactNode, createContext, useContext, useState } from "react";
 import { useSocket } from "@/hooks/use-socket";
 import { useUser } from "@clerk/nextjs";
 
-interface RoomUser {
+export interface RoomUser {
   id: string;
   name: string;
   avatar: string;

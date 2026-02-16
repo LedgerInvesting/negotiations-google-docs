@@ -116,6 +116,28 @@ export function setupWebSocket(httpServer: HTTPServer) {
       });
     });
 
+    // Handle comment creation
+    socket.on('comment:create', ({ roomId, comment }: { 
+      roomId: string; 
+      comment: {
+        id: string;
+        text: string;
+        author: string;
+        timestamp: string;
+      }
+    }) => {
+      // Broadcast new comment to all users in the room
+      io.in(roomId).emit('comment:created', { comment });
+      console.log(`Comment created in room ${roomId}:`, comment.id);
+    });
+
+    // Handle comment deletion
+    socket.on('comment:delete', ({ roomId, commentId }: { roomId: string; commentId: string }) => {
+      // Broadcast comment deletion to all users in the room
+      io.in(roomId).emit('comment:deleted', { commentId });
+      console.log(`Comment deleted in room ${roomId}:`, commentId);
+    });
+
     // Handle disconnection
     socket.on('disconnect', () => {
       console.log('Client disconnected:', socket.id);
