@@ -49,6 +49,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
   } | null>(null);
   const [replyText, setReplyText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [commentPositions, setCommentPositions] = useState<Record<string, number>>({});
 
   // Get socket connection
   const socketData = useSocket({
@@ -203,6 +204,54 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       socketData.socket?.off("comment:deleted", handleCommentDeleted);
     };
   }, [socketData.socket]);
+
+  // Calculate positions of comment marks in the editor
+  useEffect(() => {
+    if (!editor) return;
+
+    const calculatePositions = () => {
+      const positions: Record<string, number> = {};
+      const editorElement = editor.view.dom;
+      const editorRect = editorElement.getBoundingClientRect();
+
+      // Find all comment marks in the document
+      const commentMarks = editorElement.querySelectorAll('[data-comment-id]');
+      
+      commentMarks.forEach((mark) => {
+        const commentId = mark.getAttribute('data-comment-id');
+        if (commentId) {
+          const markRect = mark.getBoundingClientRect();
+          // Calculate position relative to the editor's parent container
+          const relativeTop = markRect.top - editorRect.top;
+          positions[commentId] = relativeTop;
+        }
+      });
+
+      setCommentPositions(positions);
+    };
+
+    // Calculate positions initially
+    calculatePositions();
+
+    // Recalculate on editor updates
+    const handleUpdate = () => {
+      calculatePositions();
+    };
+
+    editor.on('update', handleUpdate);
+    editor.on('selectionUpdate', handleUpdate);
+
+    // Recalculate on scroll and resize
+    window.addEventListener('scroll', calculatePositions, true);
+    window.addEventListener('resize', calculatePositions);
+
+    return () => {
+      editor.off('update', handleUpdate);
+      editor.off('selectionUpdate', handleUpdate);
+      window.removeEventListener('scroll', calculatePositions, true);
+      window.removeEventListener('resize', calculatePositions);
+    };
+  }, [editor, threads, activeCommentId]);
 
   useEffect(() => {
     if (!editor) return;
@@ -523,11 +572,41 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
     return null;
   }
 
+  // Calculate final positions with overlap handling
+  const getThreadPosition = (threadId: string): number => {
+    const basePosition = commentPositions[threadId] || 0;
+    
+    // Check for overlaps with previous threads and adjust if needed
+    let adjustedPosition = basePosition;
+    const minSpacing = 16; // minimum gap between comments
+    
+    // Get all threads before this one
+    const allThreadIds = [...(activeCommentId ? [activeCommentId] : []), ...threads.map(t => t.id)];
+    const currentIndex = allThreadIds.indexOf(threadId);
+    
+    for (let i = 0; i < currentIndex; i++) {
+      const prevThreadId = allThreadIds[i];
+      const prevPosition = commentPositions[prevThreadId] || 0;
+      const prevElement = document.getElementById(`thread-${prevThreadId}`);
+      const prevHeight = prevElement?.offsetHeight || 200; // estimate if not found
+      
+      const prevBottom = prevPosition + prevHeight + minSpacing;
+      if (adjustedPosition < prevBottom) {
+        adjustedPosition = prevBottom;
+      }
+    }
+    
+    return adjustedPosition;
+  };
+
   return (
-    <div className="w-80 space-y-4 flex-shrink-0 max-h-[calc(100vh-8rem)] overflow-y-auto sticky top-4">
+    <div className="w-80 flex-shrink-0 relative" style={{ minHeight: '100vh' }}>
       {/* Active comment input */}
       {activeCommentId && (
-        <Card className="p-4 shadow-lg border-2 border-blue-500">
+        <Card 
+          className="p-4 shadow-lg border-2 border-blue-500 absolute left-0 w-full"
+          style={{ top: `${getThreadPosition(activeCommentId)}px` }}
+        >
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2">
               <MessageSquare className="size-4" />
@@ -572,7 +651,8 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
         <Card
           key={thread.id}
           id={`thread-${thread.id}`}
-          className="p-4 shadow-md group"
+          className="p-4 shadow-md group absolute left-0 w-full"
+          style={{ top: `${getThreadPosition(thread.id)}px` }}
         >
           {/* Main comment */}
           <div className="mb-2">
