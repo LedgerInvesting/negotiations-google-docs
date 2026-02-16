@@ -49,7 +49,9 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
   } | null>(null);
   const [replyText, setReplyText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [commentPositions, setCommentPositions] = useState<Record<string, number>>({});
+  const [commentPositions, setCommentPositions] = useState<
+    Record<string, number>
+  >({});
 
   // Get socket connection
   const socketData = useSocket({
@@ -215,10 +217,10 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       const editorRect = editorElement.getBoundingClientRect();
 
       // Find all comment marks in the document
-      const commentMarks = editorElement.querySelectorAll('[data-comment-id]');
-      
+      const commentMarks = editorElement.querySelectorAll("[data-comment-id]");
+
       commentMarks.forEach((mark) => {
-        const commentId = mark.getAttribute('data-comment-id');
+        const commentId = mark.getAttribute("data-comment-id");
         if (commentId) {
           const markRect = mark.getBoundingClientRect();
           // Calculate position relative to the editor's parent container
@@ -238,18 +240,18 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       calculatePositions();
     };
 
-    editor.on('update', handleUpdate);
-    editor.on('selectionUpdate', handleUpdate);
+    editor.on("update", handleUpdate);
+    editor.on("selectionUpdate", handleUpdate);
 
     // Recalculate on scroll and resize
-    window.addEventListener('scroll', calculatePositions, true);
-    window.addEventListener('resize', calculatePositions);
+    window.addEventListener("scroll", calculatePositions, true);
+    window.addEventListener("resize", calculatePositions);
 
     return () => {
-      editor.off('update', handleUpdate);
-      editor.off('selectionUpdate', handleUpdate);
-      window.removeEventListener('scroll', calculatePositions, true);
-      window.removeEventListener('resize', calculatePositions);
+      editor.off("update", handleUpdate);
+      editor.off("selectionUpdate", handleUpdate);
+      window.removeEventListener("scroll", calculatePositions, true);
+      window.removeEventListener("resize", calculatePositions);
     };
   }, [editor, threads, activeCommentId]);
 
@@ -294,10 +296,23 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
                 block: "nearest",
               });
             }
-            
+
             // Automatically start a reply
-            setReplyingTo({ threadId: existingThread.id, dbId: existingThread.dbId });
+            setReplyingTo({
+              threadId: existingThread.id,
+              dbId: existingThread.dbId,
+            });
             setReplyText("");
+
+            // Focus the reply textarea after a short delay to ensure it's rendered
+            setTimeout(() => {
+              const replyTextarea = document.querySelector(
+                `#thread-${commentId} textarea`,
+              ) as HTMLTextAreaElement;
+              if (replyTextarea) {
+                replyTextarea.focus();
+              }
+            }, 100);
           }
         }
       }
@@ -495,6 +510,49 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
     setReplyText("");
   };
 
+  const handleCommentClick = (commentId: string) => {
+    if (!editor) return;
+
+    // Find the position of the comment mark in the document
+    const { doc } = editor.state;
+    let markPosition: { from: number; to: number } | null = null;
+
+    doc.descendants((node, pos) => {
+      if (markPosition) return false; // Stop if we already found it
+
+      if (node.marks) {
+        node.marks.forEach((mark) => {
+          if (
+            mark.type.name === "comment" &&
+            mark.attrs.commentId === commentId
+          ) {
+            markPosition = {
+              from: pos,
+              to: pos + node.nodeSize,
+            };
+          }
+        });
+      }
+    });
+
+    // If found, move cursor to that position and scroll into view
+    if (markPosition) {
+      editor.commands.setTextSelection(markPosition);
+      editor.commands.focus();
+
+      // Scroll the mark into view
+      const markElement = editor.view.dom.querySelector(
+        `[data-comment-id="${commentId}"]`,
+      );
+      if (markElement) {
+        markElement.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }
+    }
+  };
+
   const handleDeleteComment = async (commentId: string) => {
     if (!confirm("Are you sure you want to delete this comment?")) {
       return;
@@ -575,35 +633,38 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
   // Calculate final positions with overlap handling
   const getThreadPosition = (threadId: string): number => {
     const basePosition = commentPositions[threadId] || 0;
-    
+
     // Check for overlaps with previous threads and adjust if needed
     let adjustedPosition = basePosition;
     const minSpacing = 16; // minimum gap between comments
-    
+
     // Get all threads before this one
-    const allThreadIds = [...(activeCommentId ? [activeCommentId] : []), ...threads.map(t => t.id)];
+    const allThreadIds = [
+      ...(activeCommentId ? [activeCommentId] : []),
+      ...threads.map((t) => t.id),
+    ];
     const currentIndex = allThreadIds.indexOf(threadId);
-    
+
     for (let i = 0; i < currentIndex; i++) {
       const prevThreadId = allThreadIds[i];
       const prevPosition = commentPositions[prevThreadId] || 0;
       const prevElement = document.getElementById(`thread-${prevThreadId}`);
       const prevHeight = prevElement?.offsetHeight || 200; // estimate if not found
-      
+
       const prevBottom = prevPosition + prevHeight + minSpacing;
       if (adjustedPosition < prevBottom) {
         adjustedPosition = prevBottom;
       }
     }
-    
+
     return adjustedPosition;
   };
 
   return (
-    <div className="w-80 flex-shrink-0 relative" style={{ minHeight: '100vh' }}>
+    <div className="w-80 flex-shrink-0 relative" style={{ minHeight: "100vh" }}>
       {/* Active comment input */}
       {activeCommentId && (
-        <Card 
+        <Card
           className="p-4 shadow-lg border-2 border-blue-500 absolute left-0 w-full"
           style={{ top: `${getThreadPosition(activeCommentId)}px` }}
         >
@@ -651,11 +712,14 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
         <Card
           key={thread.id}
           id={`thread-${thread.id}`}
-          className="p-4 shadow-md group absolute left-0 w-full"
+          className="p-4 shadow-md group absolute left-0 w-full hover:shadow-lg transition-shadow"
           style={{ top: `${getThreadPosition(thread.id)}px` }}
         >
           {/* Main comment */}
-          <div className="mb-2">
+          <div
+            className="mb-2 cursor-pointer hover:bg-gray-50"
+            onClick={() => handleCommentClick(thread.id)}
+          >
             <div className="flex items-start justify-between mb-1">
               <div className="flex-1">
                 <span className="font-semibold text-sm">{thread.author}</span>
@@ -675,7 +739,9 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
                 </Button>
               )}
             </div>
-            <p className="text-sm whitespace-pre-wrap mb-2">{thread.text}</p>
+            <p className="text-sm whitespace-pre-wrap mb-2">
+              {thread.text}
+            </p>
           </div>
 
           {thread.replies.map((reply) => (
@@ -698,9 +764,10 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() =>
-                  setReplyingTo({ threadId: thread.id, dbId: thread.dbId })
-                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReplyingTo({ threadId: thread.id, dbId: thread.dbId });
+                }}
                 className="h-7 px-2 text-xs"
               >
                 <Reply className="size-3 mr-1" />
