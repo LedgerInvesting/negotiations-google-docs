@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '@clerk/nextjs';
-import { apiClient, Document } from '@/lib/api-client';
+import { useState, useEffect, useCallback } from "react";
+import { useAuth } from "@clerk/nextjs";
+import { apiClient, Document } from "@/lib/api-client";
 
 interface UseDocumentsResult {
   results: Document[] | undefined;
-  status: 'LoadingFirstPage' | 'CanLoadMore' | 'LoadingMore' | 'Exhausted';
+  status: "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
   loadMore: (numItems: number) => void;
   error: Error | null;
 }
@@ -12,59 +12,61 @@ interface UseDocumentsResult {
 export function useDocuments(search?: string): UseDocumentsResult {
   const { getToken } = useAuth();
   const [results, setResults] = useState<Document[] | undefined>(undefined);
-  const [status, setStatus] = useState<'LoadingFirstPage' | 'CanLoadMore' | 'LoadingMore' | 'Exhausted'>('LoadingFirstPage');
-  const [cursor, setCursor] = useState<string>('0');
+  const [status, setStatus] = useState<
+    "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted"
+  >("LoadingFirstPage");
+  const [cursor, setCursor] = useState<string>("0");
   const [error, setError] = useState<Error | null>(null);
 
-  const fetchDocuments = useCallback(async (isLoadMore: boolean = false) => {
-    try {
-      if (isLoadMore) {
-        setStatus('LoadingMore');
-      }
-
-      const token = await getToken();
-      const data = await apiClient.getDocuments(token, {
-        search,
-        limit: 5,
-        cursor: isLoadMore ? cursor : '0',
-      });
-
-      setResults((prev) => {
-        if (isLoadMore && prev) {
-          return [...prev, ...data.page];
+  const fetchDocuments = useCallback(
+    async (isLoadMore: boolean = false) => {
+      try {
+        if (isLoadMore) {
+          setStatus("LoadingMore");
         }
-        return data.page;
-      });
 
-      if (data.isDone) {
-        setStatus('Exhausted');
-      } else {
-        setStatus('CanLoadMore');
-        if (data.continueCursor) {
-          setCursor(data.continueCursor);
+        const token = await getToken();
+        const data = await apiClient.getDocuments(token, {
+          search,
+          limit: 5,
+          cursor: isLoadMore ? cursor : "0",
+        });
+
+        setResults((prev) => {
+          if (isLoadMore && prev) {
+            return [...prev, ...data.page];
+          }
+          return data.page;
+        });
+
+        if (data.isDone) {
+          setStatus("Exhausted");
+        } else {
+          setStatus("CanLoadMore");
+          if (data.continueCursor) {
+            setCursor(data.continueCursor);
+          }
         }
+      } catch (err) {
+        setError(err as Error);
+        setStatus("Exhausted");
       }
-    } catch (err) {
-      setError(err as Error);
-      setStatus('Exhausted');
-    }
-  }, [search, cursor]);
+    },
+    [search, cursor],
+  );
 
   useEffect(() => {
     setResults(undefined);
-    setStatus('LoadingFirstPage');
-    setCursor('0');
+    setStatus("LoadingFirstPage");
+    setCursor("0");
     fetchDocuments(false);
   }, [search]); // Only re-run when search changes
 
-  const loadMore = useCallback(
-    (numItems: number) => {
-      if (status === 'CanLoadMore') {
-        fetchDocuments(true);
-      }
-    },
-    [status, fetchDocuments]
-  );
+  const loadMore = useCallback(() => {
+    if (status === "CanLoadMore") {
+      fetchDocuments(true);
+    }
+  }, [status, fetchDocuments]);
 
   return {
     results,
@@ -86,6 +88,7 @@ export function useDocument(id: number) {
         setLoading(true);
         const token = await getToken();
         const data = await apiClient.getDocumentById(token, id);
+
         setDocument(data);
       } catch (err) {
         setError(err as Error);

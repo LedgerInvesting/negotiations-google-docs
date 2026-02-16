@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { MessageSquare, X, Reply } from "lucide-react";
+import { MessageSquare, X, Reply, Trash2 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { useAuth } from "@clerk/nextjs";
 import { apiClient, type Comment as ApiComment } from "@/lib/api-client";
@@ -16,6 +16,7 @@ interface CommentThread {
   dbId: number;
   text: string;
   author: string;
+  authorId: string;
   timestamp: string;
   replies: CommentReply[];
 }
@@ -25,6 +26,7 @@ interface CommentReply {
   dbId: number;
   text: string;
   author: string;
+  authorId: string;
   timestamp: string;
   parentId: number;
 }
@@ -72,6 +74,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
           dbId: c.id,
           text: c.text,
           author: c.author_name,
+          authorId: c.author_id,
           timestamp: c.created_at,
           replies: [],
         });
@@ -81,6 +84,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
           dbId: c.id,
           text: c.text,
           author: c.author_name,
+          authorId: c.author_id,
           timestamp: c.created_at,
           parentId: c.parent_id,
         });
@@ -128,8 +132,6 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
     if (!socketData.socket) return;
 
     const handleCommentCreated = ({ comment }: { comment: ApiComment }) => {
-      console.log("📩 Received new comment from another user:", comment);
-
       setThreads((prevThreads) => {
         // Check if it's a reply or a new thread
         if (comment.parent_id) {
@@ -149,6 +151,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
                     dbId: comment.id,
                     text: comment.text,
                     author: comment.author_name,
+                    authorId: comment.author_id,
                     timestamp: comment.created_at,
                     parentId: comment.parent_id,
                   },
@@ -171,6 +174,7 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
               dbId: comment.id,
               text: comment.text,
               author: comment.author_name,
+              authorId: comment.author_id,
               timestamp: comment.created_at,
               replies: [],
             },
@@ -180,7 +184,6 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
     };
 
     const handleCommentDeleted = ({ commentId }: { commentId: string }) => {
-      console.log("🗑️ Comment deleted by another user:", commentId);
       setThreads((prevThreads) => {
         // Remove thread or reply
         return prevThreads
@@ -209,7 +212,6 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       const customEvent = event as CustomEvent;
       const commentId = customEvent.detail?.commentId;
       if (commentId) {
-        console.log("🎯 Opening comment thread for:", commentId);
         setActiveCommentId(commentId);
         setCommentText("");
         setReplyingTo(null);
@@ -230,10 +232,9 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
           setCommentText("");
           setReplyingTo(null);
         } else if (commentId) {
-          // Show existing thread
+          // Show existing thread and start a reply
           const existingThread = threads.find((t) => t.id === commentId);
           if (existingThread) {
-            console.log("Viewing thread:", existingThread);
             // Scroll to the thread in the sidebar
             const threadElement = document.getElementById(
               `thread-${commentId}`,
@@ -244,6 +245,10 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
                 block: "nearest",
               });
             }
+            
+            // Automatically start a reply
+            setReplyingTo({ threadId: existingThread.id, dbId: existingThread.dbId });
+            setReplyText("");
           }
         }
       }
@@ -281,10 +286,11 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       );
 
       const newThread: CommentThread = {
-        id: activeCommentId,
+        id: dbComment.comment_id, // Use the real DB comment_id
         dbId: dbComment.id,
         text: commentText,
         author: authorName,
+        authorId: user?.id || "anonymous",
         timestamp: new Date().toISOString(),
         replies: [],
       };
@@ -301,38 +307,66 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       }
 
       setCommentText("");
-      setActiveCommentId(null);
 
-      // Update the comment mark to remove pending status and broadcast
-      if (editor) {
-        // The mark exists, just remove pending flag by re-applying
-        editor.chain().focus().run();
+      // Update the mark with the real comment_id from the database
+      if (
+        editor &&
+        activeCommentId &&
+        dbComment.comment_id !== activeCommentId
+      ) {
+        // Find and update all marks with the pending commentId
+        const { tr, doc } = editor.state;
+        let updated = false;
 
-        // Force a content save to ensure marks are persisted and broadcast to all users
-        setTimeout(() => {
-          const content = editor.getHTML();
-          // Trigger immediate save and broadcast
-          (async () => {
+        doc.descendants((node, pos) => {
+          if (node.marks) {
+            node.marks.forEach((mark) => {
+              if (
+                mark.type.name === "comment" &&
+                mark.attrs.commentId === activeCommentId
+              ) {
+                // Remove old mark
+                tr.removeMark(pos, pos + node.nodeSize, mark.type);
+                // Add new mark with real DB ID and pending = false
+                tr.addMark(
+                  pos,
+                  pos + node.nodeSize,
+                  mark.type.create({
+                    commentId: dbComment.comment_id,
+                    pending: false,
+                  }),
+                );
+                updated = true;
+              }
+            });
+          }
+        });
+
+        if (updated) {
+          editor.view.dispatch(tr);
+
+          // Force immediate save after updating the mark
+          setTimeout(async () => {
+            const content = editor.getHTML();
+
             try {
               const token = await getToken();
               await apiClient.updateDocument(token, documentId, { content });
-              console.log("💾 Comment marks saved to database");
             } catch (error) {
-              console.error("Failed to save comment marks:", error);
+              console.error("Failed to save content:", error);
             }
-          })();
-          // Broadcast to other users via WebSocket so they see the highlight
-          if (socketData.socket) {
-            socketData.socket.emit("document-update", {
-              roomId,
-              content,
-            });
-            console.log("📤 Comment highlights broadcast to other users");
-          }
-        }, 100);
+
+            if (socketData.socket) {
+              socketData.socket.emit("document-update", {
+                roomId,
+                content,
+              });
+            }
+          }, 100);
+        }
       }
 
-      console.log("✅ Comment saved and broadcast with highlights");
+      setActiveCommentId(null);
     } catch (error) {
       console.error("Failed to save comment:", error);
       alert("Failed to save comment. Please try again.");
@@ -360,10 +394,11 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
       );
 
       const newReply: CommentReply = {
-        id: replyId,
+        id: dbComment.comment_id, // Use the real DB comment_id
         dbId: dbComment.id,
         text: replyText,
         author: authorName,
+        authorId: user?.id || "anonymous",
         timestamp: new Date().toISOString(),
         parentId: replyingTo.dbId,
       };
@@ -391,8 +426,6 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
 
       setReplyText("");
       setReplyingTo(null);
-
-      console.log("✅ Reply saved and broadcast");
     } catch (error) {
       console.error("Failed to save reply:", error);
       alert("Failed to save reply. Please try again.");
@@ -411,6 +444,75 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
   const handleCancelReply = () => {
     setReplyingTo(null);
     setReplyText("");
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!confirm("Are you sure you want to delete this comment?")) {
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      await apiClient.deleteComment(token, commentId);
+
+      // Remove from local state
+      setThreads((prevThreads) =>
+        prevThreads.filter((t) => t.id !== commentId),
+      );
+
+      // Remove the comment mark from the editor
+      if (editor) {
+        const { tr, doc } = editor.state;
+        let updated = false;
+
+        doc.descendants((node, pos) => {
+          if (node.marks) {
+            node.marks.forEach((mark) => {
+              if (
+                mark.type.name === "comment" &&
+                mark.attrs.commentId === commentId
+              ) {
+                tr.removeMark(pos, pos + node.nodeSize, mark.type);
+                updated = true;
+              }
+            });
+          }
+        });
+
+        if (updated) {
+          editor.view.dispatch(tr);
+
+          // Force immediate save and broadcast
+          setTimeout(async () => {
+            const content = editor.getHTML();
+            try {
+              const token = await getToken();
+              await apiClient.updateDocument(token, documentId, { content });
+            } catch (error) {
+              console.error("Failed to save content:", error);
+            }
+
+            if (socketData.socket) {
+              socketData.socket.emit("document-update", {
+                roomId,
+                content,
+              });
+            }
+          }, 100);
+        }
+      }
+
+      // Broadcast deletion to other users
+      if (socketData.socket) {
+        socketData.socket.emit("comment:delete", {
+          roomId,
+          commentId,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to delete comment:", error);
+      alert("Failed to delete comment. Please try again.");
+    }
   };
 
   if (isLoading) {
@@ -443,6 +545,9 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
           <Textarea
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) =>
+              e.key.toUpperCase() === "ENTER" && handleAddReply()
+            }
             placeholder="Add a comment..."
             className="min-h-[80px] mb-2 resize-none"
             autoFocus
@@ -472,12 +577,23 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
           {/* Main comment */}
           <div className="mb-2">
             <div className="flex items-start justify-between mb-1">
-              <div>
+              <div className="flex-1">
                 <span className="font-semibold text-sm">{thread.author}</span>
                 <span className="text-xs text-gray-500 ml-2">
                   {new Date(thread.timestamp).toLocaleString()}
                 </span>
               </div>
+              {thread.authorId === user?.id && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDeleteComment(thread.id)}
+                  className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Delete comment"
+                >
+                  <Trash2 className="size-3 text-red-500" />
+                </Button>
+              )}
             </div>
             <p className="text-sm whitespace-pre-wrap mb-2">{thread.text}</p>
           </div>
@@ -515,10 +631,13 @@ export const Threads = ({ documentId, roomId }: ThreadsProps) => {
 
           {/* Reply input */}
           {replyingTo?.threadId === thread.id && (
-            <div className="mt-3 ml-4 pl-3 border-l-2 border-blue-300">
+            <div className="mt-3">
               <Textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key.toUpperCase() === "ENTER" && handleAddReply()
+                }
                 placeholder="Write a reply..."
                 className="min-h-[60px] mb-2 resize-none text-sm"
                 autoFocus

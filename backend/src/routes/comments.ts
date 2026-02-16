@@ -55,8 +55,12 @@ router.post('/documents/:documentId/comments', async (req: AuthRequest, res: Res
       }
     }
 
+    // Generate a unique comment_id using timestamp + random suffix
+    // This ensures each comment has a unique, persistent ID
+    const uniqueCommentId = `comment-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
     const comment = await CommentModel.create({
-      comment_id: commentId,
+      comment_id: uniqueCommentId,
       document_id: documentId,
       text,
       author_id: userId,

@@ -59,7 +59,6 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
     try {
       const token = await getToken();
       await apiClient.updateDocument(token, documentId, { content });
-      console.log('💾 Content saved to database');
     } catch (error) {
       console.error('Failed to save content:', error);
     }
@@ -68,7 +67,6 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
   const debouncedEmitUpdate = useDebounce((content: string) => {
     if (!isRemoteUpdate.current) {
       emitDocumentUpdate(content);
-      console.log('📤 Broadcasting update to other users');
     }
   }, 300);
 
@@ -80,7 +78,7 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
       (window as Window & { tiptapEditor?: typeof editor }).tiptapEditor = editor;
       // Set initial content if available
       if (initialContent && !isInitialContentSet.current) {
-        editor.commands.setContent(initialContent);
+        editor.commands.setContent(initialContent, false, { preserveWhitespace: 'full' });
         isInitialContentSet.current = true;
       }
     },
@@ -102,7 +100,6 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
       // Emit selection position to other users
       if (!isRemoteUpdate.current) {
         const { from, to } = editor.state.selection;
-        console.log('📍 Sending selection update:', { from, to });
         emitSelectionUpdate({ from, to });
       }
     },
@@ -167,19 +164,17 @@ export const Editor = ({ initialContent, documentId, onRegisterUpdateHandler }: 
       // Save current selection
       const { from, to } = editor.state.selection;
       
-      // Update content
-      editor.commands.setContent(content, false);
+      // Use preserveWhitespace to ensure marks are parsed correctly
+      editor.commands.setContent(content, false, { preserveWhitespace: 'full' });
       
       // Restore selection if possible
       try {
         editor.commands.setTextSelection({ from, to });
       } catch {
         // Selection might be invalid after content update
-        console.log('Could not restore selection');
       }
       
       isRemoteUpdate.current = false;
-      console.log('📥 Received update from another user');
     }
   }, [editor]);
 
