@@ -7,7 +7,7 @@ import "@liveblocks/react-tiptap/styles.css";
 import "./globals.css";
 
 import { Toaster } from "@/components/ui/sonner";
-import { ConvexClientProvider } from "@/components/convex-client-provider";
+import { RootProvider } from "@/components/app-provider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -26,12 +26,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <ConvexClientProvider>
+        <RootProvider>
           <NuqsAdapter>
             <Toaster />
             {children}
           </NuqsAdapter>
-        </ConvexClientProvider>
+        </RootProvider>
       </body>
     </html>
   );
