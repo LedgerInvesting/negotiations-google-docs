@@ -2,7 +2,7 @@
 
 import { toast } from "sonner";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useDeleteDocument } from "@/hooks/use-documents";
 
 import {
   AlertDialog,
@@ -16,17 +16,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-import { Id } from "../../convex/_generated/dataModel";
-import { api } from "../../convex/_generated/api";
-
 interface RemoveDialogProps {
-  documentId: Id<"documents">;
+  documentId: string;
   children: React.ReactNode;
 }
 
 export const RemoveDialog = ({ documentId, children }: RemoveDialogProps) => {
-  const remove = useMutation(api.documents.removeById);
-  const [isRemoving, setIsRemoving] = useState(false);
+  const { remove, isLoading: isRemoving } = useDeleteDocument();
 
   return (
     <AlertDialog>
@@ -42,15 +38,15 @@ export const RemoveDialog = ({ documentId, children }: RemoveDialogProps) => {
           <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             disabled={isRemoving}
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              setIsRemoving(false);
-              remove({ id: documentId })
-                .catch(() => toast.error("Something went wrong"))
-                .then(() => {
-                  toast.success("Document removed");
-                })
-                .finally(() => setIsRemoving(false));
+              try {
+                await remove(documentId);
+                toast.success("Document removed");
+                window.location.reload(); // Refresh the page
+              } catch {
+                toast.error("Something went wrong");
+              }
             }}
           >
             Delete

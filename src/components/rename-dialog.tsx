@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useUpdateDocument } from "@/hooks/use-documents";
 
-import { Id } from "../../convex/_generated/dataModel";
-import { api } from "../../convex/_generated/api";
 import {
   Dialog,
   DialogContent,
@@ -19,29 +17,26 @@ import { Button } from "./ui/button";
 import { toast } from "sonner";
 
 interface RenameDialogProps {
-  documentId: Id<"documents">;
+  documentId: string;
   initialTitle: string;
   children: React.ReactNode;
 }
 
 export const RenameDialog = ({ documentId, initialTitle, children }: RenameDialogProps) => {
-  const update = useMutation(api.documents.updateById);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const { update, isLoading: isUpdating } = useUpdateDocument();
 
   const [title, setTitle] = useState(initialTitle);
   const [open, setOpen] = useState(false);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsUpdating(true);
-
-    update({ id: documentId, title: title.trim() || "Untitled" })
-      .catch(() => toast.error("Something went wrong"))
-      .then(() => toast.success("Document renamed"))
-      .finally(() => {
-        setIsUpdating(false);
-        setOpen(false);
-      });
+    try {
+      await update(documentId, { title: title.trim() || "Untitled" });
+      toast.success("Document renamed");
+      setOpen(false);
+    } catch {
+      toast.error("Something went wrong");
+    }
   };
 
   return (

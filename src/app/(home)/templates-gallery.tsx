@@ -11,27 +11,21 @@ import {
 
 import { templates } from "@/constants/templates";
 import { useRouter } from "next/navigation";
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
-import { useState } from "react";
+import { useCreateDocument } from "@/hooks/use-documents";
 import { toast } from "sonner";
 
 export const TemplatesGallery = () => {
   const router = useRouter();
-  const create = useMutation(api.documents.create);
-  const [isCreating, setIsCreating] = useState(false);
+  const { create, isLoading: isCreating } = useCreateDocument();
 
-  const onTemplateClick = (title: string, initialContent: string) => {
-    setIsCreating(true);
-    create({ title, initialContent })
-      .catch(() => toast.error("Something went wrong"))
-      .then((documentId) => {
-        toast.success("Document created");
-        router.push(`documents/${documentId}`);
-      })
-      .finally(() => {
-        setIsCreating(false);
-      });
+  const onTemplateClick = async (title: string, initialContent: string) => {
+    try {
+      const documentId = await create({ title, initialContent });
+      toast.success("Document created");
+      router.push(`documents/${documentId}`);
+    } catch {
+      toast.error("Something went wrong");
+    }
   };
 
   return (
