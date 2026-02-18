@@ -3,18 +3,16 @@
 import { useRef, useState } from "react";
 import { BsCloudCheck, BsCloudSlash } from "react-icons/bs";
 
-import { useMutation } from "convex/react";
+import { useUpdateDocument } from "@/hooks/use-documents";
 import { useStatus } from "@liveblocks/react";
 import { useDebounce } from "@/hooks/use-debounce";
 
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
 import { toast } from "sonner";
 import { LoaderIcon } from "lucide-react";
 
 interface DocumentInputProps {
   title: string;
-  id: Id<"documents">;
+  id: string;
 }
 
 export const DocumentInput = ({ title, id }: DocumentInputProps) => {
@@ -25,29 +23,35 @@ export const DocumentInput = ({ title, id }: DocumentInputProps) => {
   const [isEditing, setIsEditing] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const mutate = useMutation(api.documents.updateById);
+  const { update } = useUpdateDocument();
 
-  const debouncedUpdate = useDebounce((newValue: string) => {
+  const debouncedUpdate = useDebounce(async (newValue: string) => {
     if (newValue === title) return;
 
     setIsPending(true);
-    mutate({ id, title: newValue })
-      .then(() => toast.success("Document updated"))
-      .catch(() => toast.error("Sometimes went wrong"))
-      .finally(() => setIsPending(false));
+    try {
+      await update(id, { title: newValue });
+      toast.success("Document updated");
+    } catch {
+      toast.error("Something went wrong");
+    } finally {
+      setIsPending(false);
+    }
   });
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     setIsPending(true);
-    mutate({ id, title: value })
-      .then(() => {
-        toast.success("Document updated");
-        setIsEditing(false);
-      })
-      .catch(() => toast.error("Sometimes went wrong"))
-      .finally(() => setIsPending(false));
+    try {
+      await update(id, { title: value });
+      toast.success("Document updated");
+      setIsEditing(false);
+    } catch {
+      toast.error("Something went wrong");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {

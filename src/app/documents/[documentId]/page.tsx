@@ -1,31 +1,27 @@
-import { auth } from "@clerk/nextjs/server";
-import { preloadQuery } from "convex/nextjs";
-
+import { db } from "@/db";
+import { documents } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { Document } from "./document";
-import { Id } from "../../../../convex/_generated/dataModel";
-import { api } from "../../../../convex/_generated/api";
 
 interface DocumentIdPageProps {
-  params: Promise<{ documentId: Id<"documents"> }>;
+  params: Promise<{ documentId: string }>;
 }
 
 const DocumentIdPage = async ({ params }: DocumentIdPageProps) => {
   const { documentId } = await params;
 
-  const { getToken } = await auth();
-  const token = (await getToken({ template: "convex" })) ?? undefined;
+  // Fetch document directly from database server-side
+  const [document] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
 
-  if (!token) {
-    throw new Error("Unauthorized");
+  if (!document) {
+    throw new Error("Document not found");
   }
 
-  const preloadedDocument = await preloadQuery(
-    api.documents.getById,
-    { id: documentId },
-    { token }
-  );
-
-  return <Document preloadedDocument={preloadedDocument} />;
+  return <Document initialDocument={document} />;
 };
 
 export default DocumentIdPage;

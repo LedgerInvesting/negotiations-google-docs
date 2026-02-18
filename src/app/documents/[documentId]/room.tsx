@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import { FullscreenLoader } from "@/components/fullscreen-loader";
 import { getUsers, getDocuments } from "./action";
 import { toast } from "sonner";
-import { Id } from "../../../../convex/_generated/dataModel";
 import { LEFT_MARGIN_DEFAULT, RIGHT_MARGIN_DEFAULT } from "@/constants/margins";
 
 type User = { id: string; name: string; avatar: string; color: string; };
@@ -61,7 +60,7 @@ export function Room({ children }: { children: ReactNode }) {
         return filteredUsers.map((user) => user.id);
       }}
       resolveRoomsInfo={async ({ roomIds }) => {
-        const documents = await getDocuments(roomIds as Id<"documents">[]);
+        const documents = await getDocuments(roomIds as string[]);
         return documents.map((document) => ({
           id: document.id,
           name: document.name,
@@ -72,10 +71,29 @@ export function Room({ children }: { children: ReactNode }) {
         id={params.documentId as string}
         initialStorage={{ leftMargin: LEFT_MARGIN_DEFAULT, rightMargin: RIGHT_MARGIN_DEFAULT }}
       >
-        <ClientSideSuspense fallback={<FullscreenLoader label="Room loading..." />}>
-          {children}
+        <ClientSideSuspense fallback={<FullscreenLoader label="Connecting to room..." />}>
+          <RoomConnectedLoader>{children}</RoomConnectedLoader>
         </ClientSideSuspense>
       </RoomProvider>
     </LiveblocksProvider>
   );
+}
+
+function RoomConnectedLoader({ children }: { children: ReactNode }) {
+  const [isConnected, setIsConnected] = useState(false);
+  
+  useEffect(() => {
+    // Small delay to ensure room is fully connected
+    const timer = setTimeout(() => {
+      setIsConnected(true);
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!isConnected) {
+    return <FullscreenLoader label="Establishing connection..." />;
+  }
+
+  return <>{children}</>;
 }
