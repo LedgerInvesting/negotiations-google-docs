@@ -53,6 +53,7 @@ export async function POST(req: Request) {
       name,
       avatar: user.imageUrl,
       color,
+      isOwner,
     },
   });
   session.allow(room, session.FULL_ACCESS);

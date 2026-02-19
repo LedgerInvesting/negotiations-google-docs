@@ -26,11 +26,14 @@ import TextAlign from "@tiptap/extension-text-align";
 import Link from "@tiptap/extension-link";
 
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
-import { useStorage } from "@liveblocks/react";
+import { useStorage, useSelf, useCreateThread } from "@liveblocks/react/suspense";
+import { useCallback } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
+import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
+import { SuggestionMode } from "@/extensions/suggestion-mode";
 import { Ruler } from "./ruler";
 import { Threads } from "./threads";
 import { LEFT_MARGIN_DEFAULT, RIGHT_MARGIN_DEFAULT } from "@/constants/margins";
@@ -42,12 +45,62 @@ interface EditorProps {
 export const Editor = ({ initialContent }: EditorProps) => {
   const leftMargin = useStorage((root) => root.leftMargin) ?? LEFT_MARGIN_DEFAULT;
   const rightMargin = useStorage((root) => root.rightMargin) ?? RIGHT_MARGIN_DEFAULT;
+  
+  const currentUser = useSelf();
+  const isOwner = currentUser?.info?.isOwner === true;
+  const createThread = useCreateThread();
+
+  // Debug log to see what we're getting
+  console.log('Current user:', currentUser);
+  console.log('Is owner:', isOwner);
 
   const liveblocks = useLiveblocksExtension({
     initialContent,
     offlineSupport_experimental: true,
   });
   const { setEditor } = useEditorStore();
+
+  // Callback to create comment threads for suggestions
+  const handleCreateSuggestion = useCallback(async (data: {
+    suggestionId: string;
+    type: "insert" | "delete";
+    text: string;
+    from: number;
+    to: number;
+  }) => {
+    try {
+      console.log('Creating thread for suggestion:', data);
+      
+      // Create thread anchored to the document position
+      const thread = await createThread({
+        body: {
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  text: `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`,
+                },
+              ],
+            },
+          ],
+        },
+        metadata: {
+          suggestionId: data.suggestionId,
+          changeType: data.type,
+          status: "pending",
+          resolved: false,
+        },
+      });
+      
+      console.log('Thread created successfully:', thread.id);
+      return thread.id;
+    } catch (error) {
+      console.error("Failed to create thread:", error);
+      return `temp-${data.suggestionId}`;
+    }
+  }, [createThread]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -87,6 +140,13 @@ export const Editor = ({ initialContent }: EditorProps) => {
       StarterKit.configure({
         history: false,
       }),
+      SuggestionInsert,
+      SuggestionDelete,
+      SuggestionMode.configure({
+        isOwner,
+        userId: currentUser?.id || "",
+        onCreateSuggestion: handleCreateSuggestion,
+      }),
       Table,
       TableCell,
       TableHeader,
@@ -116,7 +176,16 @@ export const Editor = ({ initialContent }: EditorProps) => {
       }),
       TaskItem.configure({ nested: true }),
     ],
-  });
+  }, [isOwner, currentUser?.id, leftMargin, rightMargin, handleCreateSuggestion]);
+
+  // Don't render editor until we have user data
+  if (!currentUser) {
+    return (
+      <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible flex items-center justify-center">
+        <div>Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible">
