@@ -21,12 +21,6 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
   const isOwner = currentUser?.info?.isOwner === true;
   const editThreadMetadata = useEditThreadMetadata();
 
-  // Debug: log threads
-  useEffect(() => {
-    console.log('All threads:', threads);
-    console.log('Suggestion threads:', threads.filter(t => t.metadata?.suggestionId));
-  }, [threads]);
-
   // Inject suggestion action buttons into thread UI
   useEffect(() => {
     if (!editor || !isOwner) return;
@@ -52,21 +46,26 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         // Check if buttons already exist
         if (threadEl.querySelector('.suggestion-actions')) return;
 
-        // Find the thread body to append buttons
-        const threadBody = threadEl.querySelector('.lb-root');
-        if (!threadBody) return;
+        // Find the composer (where users type replies) - we want to put buttons above it
+        const threadComposer = threadEl.querySelector('.lb-tiptap-composer');
+        if (!threadComposer) return;
 
         // Create button container
         const actionDiv = document.createElement('div');
-        actionDiv.className = 'suggestion-actions flex gap-2 mt-2 pt-2 border-t px-3 pb-2';
+        actionDiv.className = 'suggestion-actions flex gap-2 px-3 py-2 border-t border-b bg-gray-50';
         actionDiv.innerHTML = `
-          <button class="accept-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white h-9 px-3">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            Accept
+          <button class="accept-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white h-9 px-3 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            Accept ${thread.metadata?.changeType === 'insert' ? 'Insertion' : 'Deletion'}
           </button>
-          <button class="reject-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 bg-white h-9 px-3">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            Reject
+          <button class="reject-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 bg-white h-9 px-3 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+            Reject ${thread.metadata?.changeType === 'insert' ? 'Insertion' : 'Deletion'}
           </button>
         `;
 
@@ -75,9 +74,10 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         const rejectBtn = actionDiv.querySelector('.reject-btn');
 
         if (acceptBtn) {
-          acceptBtn.addEventListener('click', () => {
+          acceptBtn.addEventListener('click', async () => {
+            console.log('[Threads] Accepting suggestion:', suggestionId);
             acceptSuggestion(editor, suggestionId);
-            editThreadMetadata({
+            await editThreadMetadata({
               threadId: thread.id,
               metadata: {
                 ...thread.metadata,
@@ -89,9 +89,10 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         }
 
         if (rejectBtn) {
-          rejectBtn.addEventListener('click', () => {
+          rejectBtn.addEventListener('click', async () => {
+            console.log('[Threads] Rejecting suggestion:', suggestionId);
             rejectSuggestion(editor, suggestionId);
-            editThreadMetadata({
+            await editThreadMetadata({
               threadId: thread.id,
               metadata: {
                 ...thread.metadata,
@@ -102,100 +103,22 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
           });
         }
 
-        // Append to thread body
-        threadBody.appendChild(actionDiv);
+        // Insert buttons above the composer (before it in DOM)
+        threadComposer.parentNode?.insertBefore(actionDiv, threadComposer);
       });
     }, 500);
 
     return () => clearInterval(interval);
   }, [editor, isOwner, threads, editThreadMetadata]);
 
-  // Separate suggestion threads from regular threads
-  const suggestionThreads = threads.filter(t => t.metadata?.suggestionId);
-  const regularThreads = threads.filter(t => !t.metadata?.suggestionId);
-
+  // Show ALL threads together (both suggestions and regular comments)
   return (
     <>
       <div className="anchored-threads">
-        <AnchoredThreads editor={editor} threads={regularThreads} />
+        <AnchoredThreads editor={editor} threads={threads} />
       </div>
       
-      {/* Show suggestion threads in floating UI */}
-      {suggestionThreads.length > 0 && (
-        <div className="fixed right-8 top-24 w-80 max-h-[calc(100vh-200px)] overflow-y-auto space-y-4 z-50">
-          <div className="bg-white rounded-lg shadow-lg border p-4">
-            <h3 className="text-sm font-semibold mb-3">Pending Suggestions</h3>
-            {suggestionThreads.map((thread) => {
-              const suggestionId = thread.metadata?.suggestionId as string;
-              const changeType = thread.metadata?.changeType as string;
-              const status = thread.metadata?.status as string;
-              
-              if (status !== 'pending') return null;
-              
-              return (
-                <div key={thread.id} className="mb-4 p-3 border rounded-md bg-gray-50">
-                  <div className="text-xs text-gray-500 mb-1">
-                    {changeType === 'insert' ? '+ Insertion' : '- Deletion'}
-                  </div>
-                  <div className="text-sm mb-2">
-                    {(() => {
-                      const firstComment = thread.comments[0];
-                      const firstContent = firstComment?.body?.content?.[0];
-                      const firstChild = firstContent?.children?.[0];
-                      return (firstChild && 'text' in firstChild ? firstChild.text : 'Suggested change');
-                    })()}
-                  </div>
-                  
-                  {isOwner && (
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        className="flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white h-8 px-3"
-                        onClick={() => {
-                          if (editor) {
-                            acceptSuggestion(editor, suggestionId);
-                            editThreadMetadata({
-                              threadId: thread.id,
-                              metadata: {
-                                ...thread.metadata,
-                                status: "accepted",
-                                resolved: true,
-                              },
-                            });
-                          }
-                        }}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        Accept
-                      </button>
-                      <button
-                        className="flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 bg-white h-8 px-3"
-                        onClick={() => {
-                          if (editor) {
-                            rejectSuggestion(editor, suggestionId);
-                            editThreadMetadata({
-                              threadId: thread.id,
-                              metadata: {
-                                ...thread.metadata,
-                                status: "rejected",
-                                resolved: true,
-                              },
-                            });
-                          }
-                        }}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      
-      <FloatingThreads editor={editor} threads={regularThreads} className="floating-threads" />
+      <FloatingThreads editor={editor} threads={threads} className="floating-threads" />
       <FloatingComposer editor={editor} className="floating-composer" />
     </>
   );
