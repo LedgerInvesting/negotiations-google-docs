@@ -27,9 +27,10 @@ import Link from "@tiptap/extension-link";
 
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { useStorage, useSelf, useCreateThread } from "@liveblocks/react/suspense";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
+import { updateSuggestionThreadId } from "@/lib/suggestion-validators";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
@@ -50,17 +51,20 @@ export const Editor = ({ initialContent }: EditorProps) => {
   const isOwner = currentUser?.info?.isOwner === true;
   const createThread = useCreateThread();
 
-  // Debug log to see what we're getting
-  console.log('Current user:', currentUser);
-  console.log('Is owner:', isOwner);
+  console.log('[Editor] Current user:', currentUser?.id, 'Is owner:', isOwner);
 
   const liveblocks = useLiveblocksExtension({
     initialContent,
     offlineSupport_experimental: true,
   });
+  
   const { setEditor } = useEditorStore();
+  
+  // Track pending thread operations with debounce
+  const pendingThreadsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null);
 
-  // Callback to create comment threads for suggestions
+  // Callback to create comment threads for suggestions with debouncing
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
     type: "insert" | "delete";
@@ -68,55 +72,83 @@ export const Editor = ({ initialContent }: EditorProps) => {
     from: number;
     to: number;
   }) => {
-    try {
-      console.log('Creating thread for suggestion:', data);
-      
-      // Create thread anchored to the document position
-      const thread = await createThread({
-        body: {
-          version: 1,
-          content: [
-            {
-              type: "paragraph",
-              children: [
+    console.log('[Editor] Suggestion created:', data);
+    
+    // Clear any existing timeout for this suggestion
+    const existingTimeout = pendingThreadsRef.current.get(data.suggestionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+    
+    // Schedule thread creation after user stops typing
+    return new Promise<string>((resolve) => {
+      const timeout = setTimeout(async () => {
+        try {
+          console.log('[Editor] Creating thread (debounced):', data.suggestionId);
+          
+          const thread = await createThread({
+            body: {
+              version: 1,
+              content: [
                 {
-                  text: `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`,
+                  type: "paragraph",
+                  children: [
+                    {
+                      text: `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`,
+                    },
+                  ],
                 },
               ],
             },
-          ],
-        },
-        metadata: {
-          suggestionId: data.suggestionId,
-          changeType: data.type,
-          status: "pending",
-          resolved: false,
-        },
-      });
+            metadata: {
+              suggestionId: data.suggestionId,
+              changeType: data.type,
+              status: "pending",
+              resolved: false,
+            },
+          });
+          
+          console.log('[Editor] Thread created successfully:', thread.id);
+          
+          // Update the suggestion's thread ID
+          if (editorRef.current) {
+            const updated = updateSuggestionThreadId(editorRef.current, data.suggestionId, thread.id);
+            console.log('[Editor] Thread ID updated:', updated);
+          }
+          
+          pendingThreadsRef.current.delete(data.suggestionId);
+          resolve(thread.id);
+        } catch (error) {
+          console.error("[Editor] Failed to create thread:", error);
+          pendingThreadsRef.current.delete(data.suggestionId);
+          // Return temp ID on error
+          resolve(`temp-${data.suggestionId}`);
+        }
+      }, 1500); // Wait 1.5s after last keystroke
       
-      console.log('Thread created successfully:', thread.id);
-      return thread.id;
-    } catch (error) {
-      console.error("Failed to create thread:", error);
-      return `temp-${data.suggestionId}`;
-    }
+      pendingThreadsRef.current.set(data.suggestionId, timeout);
+    });
   }, [createThread]);
 
   const editor = useEditor({
     immediatelyRender: false,
     onCreate({ editor }) {
+      console.log('[Editor] Editor created');
       setEditor(editor);
+      editorRef.current = editor;
     },
     onDestroy() {
+      console.log('[Editor] Editor destroyed');
       setEditor(null);
+      editorRef.current = null;
+      // Clear all pending thread operations
+      pendingThreadsRef.current.forEach(timeout => clearTimeout(timeout));
+      pendingThreadsRef.current.clear();
     },
     onUpdate({ editor }) {
       setEditor(editor);
     },
     onSelectionUpdate({ editor }) {
-      setEditor(editor);
-    },
-    onTransaction({ editor }) {
       setEditor(editor);
     },
     onFocus({ editor }) {
