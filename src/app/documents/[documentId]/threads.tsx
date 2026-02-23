@@ -121,8 +121,7 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
 
   const handleAccept = (
     threadId: string,
-    suggestionId: string,
-    metadata: Record<string, unknown>
+    suggestionId: string
   ) => {
     if (!editor) return;
     console.log("[Threads] Accepting suggestion:", suggestionId);
@@ -130,17 +129,14 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
     editThreadMetadata({
       threadId,
       metadata: {
-        ...metadata,
         status: "accepted",
-        resolved: true,
       },
     });
   };
 
   const handleReject = (
     threadId: string,
-    suggestionId: string,
-    metadata: Record<string, unknown>
+    suggestionId: string
   ) => {
     if (!editor) return;
     console.log("[Threads] Rejecting suggestion:", suggestionId);
@@ -148,9 +144,7 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
     editThreadMetadata({
       threadId,
       metadata: {
-        ...metadata,
         status: "rejected",
-        resolved: true,
       },
     });
   };
@@ -225,11 +219,7 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
                     <button
                       className="suggestion-accept-btn"
                       onClick={() =>
-                        handleAccept(
-                          thread.id,
-                          suggestionId,
-                          thread.metadata as Record<string, unknown>
-                        )
+                        handleAccept(thread.id, suggestionId)
                       }
                     >
                       <CheckIcon className="w-4 h-4 mr-1.5" />
@@ -238,11 +228,7 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
                     <button
                       className="suggestion-reject-btn"
                       onClick={() =>
-                        handleReject(
-                          thread.id,
-                          suggestionId,
-                          thread.metadata as Record<string, unknown>
-                        )
+                        handleReject(thread.id, suggestionId)
                       }
                     >
                       <XIcon className="w-4 h-4 mr-1.5" />

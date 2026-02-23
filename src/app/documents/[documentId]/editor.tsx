@@ -104,7 +104,6 @@ export const Editor = ({ initialContent }: EditorProps) => {
               suggestionId: data.suggestionId,
               changeType: data.type,
               status: "pending",
-              resolved: false,
             },
           });
           

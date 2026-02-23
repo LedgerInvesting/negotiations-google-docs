@@ -10,9 +10,9 @@ const client = createClient({
 declare global {
   interface Liveblocks {
     // Custom thread metadata for suggestions and comments
+    // Note: "resolved" is a built-in Liveblocks thread property, NOT metadata
     ThreadMetadata: {
-      resolved: boolean;
-      // Suggestion-specific metadata
+      // Suggestion-specific metadata (all optional so regular threads work too)
       suggestionId?: string;
       changeType?: string; // "insert" | "delete"
       status?: string; // "pending" | "accepted" | "rejected"
