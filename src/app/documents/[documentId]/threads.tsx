@@ -6,7 +6,7 @@ import { Thread } from "@liveblocks/react-ui";
 import { Editor } from "@tiptap/react";
 import { useSelf } from "@liveblocks/react/suspense";
 import { acceptSuggestion, rejectSuggestion } from "@/lib/suggestion-helpers";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 
 export const Threads = ({ editor }: { editor: Editor | null }) => {
@@ -17,27 +17,115 @@ export const Threads = ({ editor }: { editor: Editor | null }) => {
   );
 };
 
+/**
+ * Find the vertical position (top offset) of a suggestion mark in the editor
+ * by looking for the DOM element with the matching suggestion ID.
+ */
+function getSuggestionTopOffset(
+  editor: Editor | null,
+  suggestionId: string,
+  containerEl: HTMLElement | null
+): number | null {
+  if (!editor || !containerEl) return null;
+
+  // Find the suggestion mark element in the editor DOM
+  const editorEl = editor.view.dom;
+  const markEl =
+    editorEl.querySelector(`[data-suggestion-id="${suggestionId}"]`);
+
+  if (!markEl) return null;
+
+  // Get the bounding rect of the suggestion mark and the container
+  const markRect = markEl.getBoundingClientRect();
+  const containerRect = containerEl.getBoundingClientRect();
+
+  // Return the top offset relative to the container
+  return markRect.top - containerRect.top;
+}
+
 export function ThreadsList({ editor }: { editor: Editor | null }) {
   const { threads } = useThreads({ query: { resolved: false } });
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
   const editThreadMetadata = useEditThreadMetadata();
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Debug: log threads
-  useEffect(() => {
-    console.log('[Threads] All threads:', threads.length);
-    threads.forEach(t => {
-      console.log('[Threads] Thread:', t.id, 'metadata:', t.metadata);
-    });
-  }, [threads]);
+  // Track vertical positions for each suggestion thread
+  const [threadPositions, setThreadPositions] = useState<
+    Map<string, number>
+  >(new Map());
 
   // Separate suggestion threads from regular comment threads
-  const suggestionThreads = threads.filter(t => t.metadata?.suggestionId);
-  const regularThreads = threads.filter(t => !t.metadata?.suggestionId);
+  const suggestionThreads = threads.filter(
+    (t) => t.metadata?.suggestionId
+  );
+  const regularThreads = threads.filter(
+    (t) => !t.metadata?.suggestionId
+  );
 
-  const handleAccept = (threadId: string, suggestionId: string, metadata: Record<string, unknown>) => {
+  // Calculate positions for suggestion threads
+  const updatePositions = useCallback(() => {
+    if (!editor || suggestionThreads.length === 0) return;
+
+    const newPositions = new Map<string, number>();
+
+    suggestionThreads.forEach((thread) => {
+      const suggestionId = thread.metadata?.suggestionId as string;
+      if (!suggestionId) return;
+
+      const top = getSuggestionTopOffset(
+        editor,
+        suggestionId,
+        containerRef.current
+      );
+      if (top !== null) {
+        newPositions.set(thread.id, top);
+      }
+    });
+
+    setThreadPositions(newPositions);
+  }, [editor, suggestionThreads]);
+
+  // Update positions on editor changes, scroll, and window resize
+  useEffect(() => {
     if (!editor) return;
-    console.log('[Threads] Accepting suggestion:', suggestionId);
+
+    // Initial position calculation (with delay for DOM to settle)
+    const initialTimer = setTimeout(updatePositions, 300);
+
+    // Update on editor transactions (content changes, selection changes)
+    const onTransaction = () => {
+      requestAnimationFrame(updatePositions);
+    };
+    editor.on("transaction", onTransaction);
+
+    // Update on scroll
+    const scrollHandler = () => {
+      requestAnimationFrame(updatePositions);
+    };
+    const scrollContainer = document.querySelector(
+      ".size-full.overflow-x-auto"
+    );
+    scrollContainer?.addEventListener("scroll", scrollHandler);
+    window.addEventListener("scroll", scrollHandler);
+    window.addEventListener("resize", scrollHandler);
+
+    return () => {
+      clearTimeout(initialTimer);
+      editor.off("transaction", onTransaction);
+      scrollContainer?.removeEventListener("scroll", scrollHandler);
+      window.removeEventListener("scroll", scrollHandler);
+      window.removeEventListener("resize", scrollHandler);
+    };
+  }, [editor, updatePositions]);
+
+  const handleAccept = (
+    threadId: string,
+    suggestionId: string,
+    metadata: Record<string, unknown>
+  ) => {
+    if (!editor) return;
+    console.log("[Threads] Accepting suggestion:", suggestionId);
     acceptSuggestion(editor, suggestionId);
     editThreadMetadata({
       threadId,
@@ -49,9 +137,13 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
     });
   };
 
-  const handleReject = (threadId: string, suggestionId: string, metadata: Record<string, unknown>) => {
+  const handleReject = (
+    threadId: string,
+    suggestionId: string,
+    metadata: Record<string, unknown>
+  ) => {
     if (!editor) return;
-    console.log('[Threads] Rejecting suggestion:', suggestionId);
+    console.log("[Threads] Rejecting suggestion:", suggestionId);
     rejectSuggestion(editor, suggestionId);
     editThreadMetadata({
       threadId,
@@ -63,6 +155,13 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
     });
   };
 
+  // Sort suggestion threads by their vertical position
+  const sortedSuggestionThreads = [...suggestionThreads].sort((a, b) => {
+    const posA = threadPositions.get(a.id) ?? Infinity;
+    const posB = threadPositions.get(b.id) ?? Infinity;
+    return posA - posB;
+  });
+
   return (
     <>
       {/* Regular comment threads (anchored to text) */}
@@ -70,41 +169,81 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         <AnchoredThreads editor={editor} threads={regularThreads} />
       </div>
 
-      {/* Suggestion threads rendered with full Liveblocks Thread component */}
-      {suggestionThreads.length > 0 && (
-        <div className="suggestion-threads-panel">
-          {suggestionThreads.map((thread) => {
+      {/* Suggestion threads positioned at the level of their marks */}
+      {sortedSuggestionThreads.length > 0 && (
+        <div
+          ref={containerRef}
+          className="suggestion-threads-panel"
+        >
+          {sortedSuggestionThreads.map((thread) => {
             const suggestionId = thread.metadata?.suggestionId as string;
             const changeType = thread.metadata?.changeType as string;
             const status = thread.metadata?.status as string;
+            const topOffset = threadPositions.get(thread.id);
 
             if (status !== "pending") return null;
 
             return (
-              <div key={thread.id} className="suggestion-thread-wrapper">
+              <div
+                key={thread.id}
+                className="suggestion-thread-wrapper"
+                style={
+                  topOffset !== undefined
+                    ? {
+                        position: "absolute",
+                        top: `${topOffset}px`,
+                        left: 0,
+                        right: 0,
+                      }
+                    : undefined
+                }
+              >
                 {/* Label showing this is a suggestion */}
                 <div className="suggestion-thread-label">
-                  <span className={`suggestion-badge ${changeType === 'insert' ? 'suggestion-badge-insert' : 'suggestion-badge-delete'}`}>
-                    {changeType === 'insert' ? '+ Insertion' : '− Deletion'}
+                  <span
+                    className={`suggestion-badge ${
+                      changeType === "insert"
+                        ? "suggestion-badge-insert"
+                        : "suggestion-badge-delete"
+                    }`}
+                  >
+                    {changeType === "insert"
+                      ? "+ Insertion"
+                      : "− Deletion"}
                   </span>
                 </div>
 
-                {/* Full Liveblocks Thread component - supports commenting, replying */}
-                <Thread thread={thread} className="suggestion-thread" />
+                {/* Full Liveblocks Thread component */}
+                <Thread
+                  thread={thread}
+                  className="suggestion-thread"
+                />
 
                 {/* Accept/Reject buttons for owners */}
                 {isOwner && (
                   <div className="suggestion-actions-bar">
                     <button
                       className="suggestion-accept-btn"
-                      onClick={() => handleAccept(thread.id, suggestionId, thread.metadata as Record<string, unknown>)}
+                      onClick={() =>
+                        handleAccept(
+                          thread.id,
+                          suggestionId,
+                          thread.metadata as Record<string, unknown>
+                        )
+                      }
                     >
                       <CheckIcon className="w-4 h-4 mr-1.5" />
                       Accept
                     </button>
                     <button
                       className="suggestion-reject-btn"
-                      onClick={() => handleReject(thread.id, suggestionId, thread.metadata as Record<string, unknown>)}
+                      onClick={() =>
+                        handleReject(
+                          thread.id,
+                          suggestionId,
+                          thread.metadata as Record<string, unknown>
+                        )
+                      }
                     >
                       <XIcon className="w-4 h-4 mr-1.5" />
                       Reject
@@ -117,7 +256,11 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         </div>
       )}
 
-      <FloatingThreads editor={editor} threads={regularThreads} className="floating-threads" />
+      <FloatingThreads
+        editor={editor}
+        threads={regularThreads}
+        className="floating-threads"
+      />
       <FloatingComposer editor={editor} className="floating-composer" />
     </>
   );

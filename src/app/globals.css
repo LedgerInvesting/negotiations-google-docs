@@ -20,14 +20,10 @@
 
 /* Suggestion threads panel */
 .suggestion-threads-panel {
-  position: absolute;
-  right: 12px;
+  position: relative;
   max-width: 300px;
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
+  min-height: 100px;
 }
 
 .suggestion-thread-wrapper {
