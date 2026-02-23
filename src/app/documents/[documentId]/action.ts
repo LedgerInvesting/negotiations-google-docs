@@ -1,10 +1,24 @@
 "use server";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { getDocumentsByIds } from "@/hooks/use-documents";
+import { db } from "@/db";
+import { documents } from "@/db/schema";
+import { inArray } from "drizzle-orm";
 
 export async function getDocuments(ids: string[]) {
-  return await getDocumentsByIds(ids);
+  // Query the database directly instead of using fetch (which doesn't work in server actions)
+  const foundDocs = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+    })
+    .from(documents)
+    .where(inArray(documents.id, ids));
+
+  return ids.map((id: string) => {
+    const doc = foundDocs.find((d) => d.id === id);
+    return doc ? { id: doc.id, name: doc.title } : { id, name: '[Removed]' };
+  });
 }
 
 export async function getUsers() {
