@@ -15,6 +15,8 @@ export interface Document {
   updatedAt: string | Date;
 }
 
+export type PaginationStatus = 'LoadingFirstPage' | 'CanLoadMore' | 'Exhausted';
+
 interface DocumentsResponse {
   documents: Document[];
   nextCursor: string | null;
@@ -70,7 +72,7 @@ export function useDocuments(search?: string) {
     }
   }
 
-  const loadMore = useCallback((_numItems: number) => {
+  const loadMore = useCallback(() => {
     if (data?.nextCursor && hasMore) {
       setCursor(data.nextCursor);
     }
@@ -78,7 +80,7 @@ export function useDocuments(search?: string) {
 
   return {
     results: cursor === null ? data?.documents : allDocuments,
-    status: isLoading ? 'LoadingFirstPage' : hasMore ? 'CanLoadMore' : 'Exhausted',
+    status: (isLoading ? 'LoadingFirstPage' : hasMore ? 'CanLoadMore' : 'Exhausted') as PaginationStatus,
     loadMore,
     error,
   };
@@ -183,5 +185,5 @@ export async function getDocumentsByIds(ids: string[]) {
 
   if (!res.ok) throw new Error('Failed to fetch documents');
   
-  return res.json();
+  return res.json() as Promise<Array<{ id: string; name: string }>>;
 }

@@ -1,5 +1,5 @@
 import { LoaderIcon } from "lucide-react";
-import { Document } from "@/hooks/use-documents";
+import type { Document, PaginationStatus } from "@/hooks/use-documents";
 import {
   Table,
   TableBody,
@@ -11,11 +11,9 @@ import {
 import { DocumentRow } from "./document-row";
 import { Button } from "@/components/ui/button";
 
-type PaginationStatus = 'LoadingFirstPage' | 'CanLoadMore' | 'Exhausted';
-
 interface DocumentsTableProps {
   documents: Document[] | undefined;
-  loadMore: (numItems: number) => void;
+  loadMore: () => void;
   status: PaginationStatus;
 }
 
@@ -57,7 +55,7 @@ export const DocumentsTable = ({ documents, loadMore, status }: DocumentsTablePr
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => loadMore(5)}
+          onClick={() => loadMore()}
           disabled={status !== "CanLoadMore"}
         >
           {status === "CanLoadMore" ? "Load more" : "End of results"}

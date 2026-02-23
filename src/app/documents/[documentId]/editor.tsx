@@ -128,8 +128,10 @@ export const Editor = ({ initialContent }: EditorProps) => {
   // Callback to create comment threads for suggestions with debouncing
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
-    type: "insert" | "delete";
+    type: "insert" | "delete" | "replace";
     text: string;
+    oldText?: string;
+    newText?: string;
     from: number;
     to: number;
   }) => {
@@ -147,6 +149,11 @@ export const Editor = ({ initialContent }: EditorProps) => {
         try {
           console.log('[Editor] Creating thread (debounced):', data.suggestionId);
           
+          const label =
+            data.type === "replace"
+              ? `Replace "${(data.oldText ?? "").substring(0, 50)}${(data.oldText ?? "").length > 50 ? "..." : ""}" with "${(data.newText ?? "").substring(0, 50)}${(data.newText ?? "").length > 50 ? "..." : ""}"`
+              : `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
+
           const thread = await createThread({
             body: {
               version: 1,
@@ -155,7 +162,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
                   type: "paragraph",
                   children: [
                     {
-                      text: `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`,
+                      text: label,
                     },
                   ],
                 },

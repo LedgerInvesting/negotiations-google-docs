@@ -40,7 +40,7 @@ export async function GET(
 // PATCH - Update document
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { documentId: string } },
+  { params }: { params: Promise<{ documentId: string }> },
 ) {
   try {
     const { userId, sessionClaims } = await auth();
@@ -55,7 +55,7 @@ export async function PATCH(
     const [document] = await db
       .select()
       .from(documents)
-      .where(eq(documents.id, params.documentId))
+      .where(eq(documents.id, (await params).documentId))
       .limit(1);
 
     if (!document) {
@@ -80,7 +80,7 @@ export async function PATCH(
     const [updatedDocument] = await db
       .update(documents)
       .set({ title, updatedAt: new Date() })
-      .where(eq(documents.id, params.documentId))
+      .where(eq(documents.id, (await params).documentId))
       .returning();
 
     // Broadcast document update
@@ -96,7 +96,7 @@ export async function PATCH(
 // DELETE - Delete document
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { documentId: string } },
+  { params }: { params: Promise<{ documentId: string }> },
 ) {
   try {
     const { userId, sessionClaims } = await auth();
@@ -111,7 +111,7 @@ export async function DELETE(
     const [document] = await db
       .select()
       .from(documents)
-      .where(eq(documents.id, params.documentId))
+      .where(eq(documents.id, (await params).documentId))
       .limit(1);
 
     if (!document) {
@@ -130,10 +130,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    await db.delete(documents).where(eq(documents.id, params.documentId));
+    await db.delete(documents).where(eq(documents.id, (await params).documentId));
 
     // Broadcast document deletion
-    broadcastDocumentUpdate("deleted", { id: params.documentId });
+    broadcastDocumentUpdate("deleted", { id: (await params).documentId });
 
     return NextResponse.json({ success: true });
   } catch (error) {

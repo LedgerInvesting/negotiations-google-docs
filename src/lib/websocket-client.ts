@@ -6,7 +6,7 @@ export type DocumentEventType = 'created' | 'updated' | 'deleted';
 
 export interface DocumentEvent {
   type: DocumentEventType;
-  data: any;
+  data: Record<string, unknown>;
 }
 
 export function useWebSocket(onMessage?: (event: DocumentEvent) => void) {
@@ -52,7 +52,7 @@ export function useWebSocket(onMessage?: (event: DocumentEvent) => void) {
         }
       };
 
-      ws.onerror = (error) => {
+      ws.onerror = () => {
         console.warn('[WS] Connection error (this is normal if WebSocket server is not running)');
       };
 

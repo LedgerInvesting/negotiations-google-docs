@@ -19,7 +19,7 @@ export const Document = ({ initialDocument }: DocumentProps) => {
           <Toolbar />
         </div>
         <div className="pt-[114px] print:pt-0">
-          <Editor initialContent={initialDocument.initialContent} />
+          <Editor initialContent={initialDocument.initialContent ?? undefined} />
         </div>
       </div>
     </Room>

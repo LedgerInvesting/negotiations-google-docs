@@ -121,6 +121,11 @@
   background-color: #fee2e2;
 }
 
+.suggestion-badge-replace {
+  color: #7c3aed;
+  background-color: #ede9fe;
+}
+
 .suggestion-thread {
   border: none !important;
   box-shadow: none !important;

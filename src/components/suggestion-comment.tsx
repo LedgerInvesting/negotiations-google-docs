@@ -2,8 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { CheckIcon, XIcon } from "lucide-react";
-import { useEditor } from "@tiptap/react";
-import { acceptSuggestion, rejectSuggestion } from "@/lib/suggestion-helpers";
 import { useSelf } from "@liveblocks/react";
 
 interface SuggestionCommentProps {
@@ -14,8 +12,6 @@ interface SuggestionCommentProps {
 }
 
 export function SuggestionComment({
-  suggestionId,
-  changeType,
   onAccept,
   onReject,
 }: SuggestionCommentProps) {

@@ -9,8 +9,10 @@ export interface SuggestionModeOptions {
   userId: string;
   onCreateSuggestion?: (data: {
     suggestionId: string;
-    type: "insert" | "delete";
+    type: "insert" | "delete" | "replace";
     text: string;
+    oldText?: string;
+    newText?: string;
     from: number;
     to: number;
   }) => Promise<string>; // Returns commentThreadId
@@ -21,12 +23,32 @@ function generateSuggestionId(): string {
   return `suggestion-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-interface DocChange {
-  type: "insert" | "delete";
+interface InsertChange {
+  type: "insert";
   from: number;
   to: number;
   text: string;
 }
+
+interface DeleteChange {
+  type: "delete";
+  from: number;
+  to: number;
+  text: string;
+}
+
+interface ReplaceChange {
+  type: "replace";
+  /** Where we re-insert the deleted text (with delete mark) */
+  from: number;
+  /** Range of the newly inserted text that already exists in the doc */
+  insertFrom: number;
+  insertTo: number;
+  oldText: string;
+  newText: string;
+}
+
+type DocChange = InsertChange | DeleteChange | ReplaceChange;
 
 function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
   if (change.type === "insert") {
@@ -34,6 +56,15 @@ function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
       ...change,
       from: mapping.map(change.from, 1),
       to: mapping.map(change.to, -1),
+    };
+  }
+
+  if (change.type === "replace") {
+    return {
+      ...change,
+      from: mapping.map(change.from, 1),
+      insertFrom: mapping.map(change.insertFrom, 1),
+      insertTo: mapping.map(change.insertTo, -1),
     };
   }
 
@@ -64,6 +95,19 @@ function mergeDocChanges(changes: DocChange[]): DocChange[] {
     ) {
       prev.to = change.to;
       prev.text += change.text;
+      continue;
+    }
+
+    // If the user continues typing immediately after a replacement,
+    // grow the replacement's inserted range/text rather than creating
+    // a separate insert suggestion.
+    if (
+      prev.type === "replace" &&
+      change.type === "insert" &&
+      prev.insertTo === change.from
+    ) {
+      prev.insertTo = change.to;
+      prev.newText += change.text;
       continue;
     }
 
@@ -115,6 +159,25 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
 
       const insertedText =
         newTo > newFrom ? docAfterStep.textBetween(newFrom, newTo, "\n", "\n") : "";
+
+      // Replacement: user replaced an existing range with new content.
+      // Represent as a single logical change so it becomes one thread
+      // and one suggestionId controlling both insert+delete marks.
+      if (deletedText.length > 0 && insertedText.length > 0) {
+        const deletePos = mapFromBeforeStepToEnd.map(from, 1);
+        const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
+        const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
+
+        changes.push({
+          type: "replace",
+          from: deletePos,
+          insertFrom,
+          insertTo,
+          oldText: deletedText,
+          newText: insertedText,
+        });
+        return;
+      }
 
       // Deletions: user removed content; we’ll re-insert it with a delete mark when the debounce completes.
       if (deletedText.length > 0) {
@@ -171,8 +234,67 @@ function createSuggestionsForChanges(
 
   // IMPORTANT: apply insert marks before inserting delete-suggestion text.
   // Inserting deleted text shifts document positions; marking first ensures marks stay attached.
-  const insertChanges = changes.filter((c) => c.type === "insert");
-  const deleteChanges = changes.filter((c) => c.type === "delete");
+  const replaceChanges = changes.filter((c) => c.type === "replace") as ReplaceChange[];
+  const insertChanges = changes.filter((c) => c.type === "insert") as InsertChange[];
+  const deleteChanges = changes.filter((c) => c.type === "delete") as DeleteChange[];
+
+  // Replacements become one suggestionId controlling BOTH:
+  // - insert mark over the new content
+  // - re-inserted old content with delete mark
+  replaceChanges.forEach((change) => {
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+    const commentThreadId = `temp-${suggestionId}`;
+
+    const insertMark = suggestionInsertType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+    const deleteMark = suggestionDeleteType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+
+    console.log('[SuggestionMode] Adding replace marks:', {
+      suggestionId,
+      from: change.from,
+      insertFrom: change.insertFrom,
+      insertTo: change.insertTo,
+      oldText: change.oldText.substring(0, 50),
+      newText: change.newText.substring(0, 50),
+    });
+
+    // 1) Mark the new text as an insertion suggestion.
+    tr.addMark(change.insertFrom, change.insertTo, insertMark);
+
+    // 2) Re-insert the old text at the same position, marked as deletion.
+    // This produces a visible "old (strikethrough)" + "new (green)" pair.
+    const oldTextNode = view.state.schema.text(change.oldText, [deleteMark]);
+    tr.insert(change.from, oldTextNode);
+
+    // Create ONE thread for the replacement.
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
+        suggestionId,
+        type: "replace",
+        text: `${change.oldText} → ${change.newText}`,
+        oldText: change.oldText,
+        newText: change.newText,
+        from: change.from,
+        to: change.insertTo,
+      })
+        .then((threadId) => {
+          console.log('[SuggestionMode] Thread created for replace:', threadId);
+        })
+        .catch((error: unknown) => {
+          console.error("[SuggestionMode] Failed to create comment thread:", error);
+        });
+    }
+  });
 
   insertChanges.forEach((change) => {
     const suggestionId = generateSuggestionId();
