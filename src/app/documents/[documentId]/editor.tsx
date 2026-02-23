@@ -27,10 +27,12 @@ import Link from "@tiptap/extension-link";
 
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { useStorage, useSelf, useCreateThread } from "@liveblocks/react/suspense";
-import { useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
+import { useCallback, useRef, useState } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
 import { updateSuggestionThreadId } from "@/lib/suggestion-validators";
+import { cleanDocumentJSON } from "@/lib/clean-document";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
@@ -59,6 +61,50 @@ export const Editor = ({ initialContent }: EditorProps) => {
   });
   
   const { setEditor } = useEditorStore();
+  const params = useParams();
+  const documentId = params.documentId as string;
+  
+  // Track whether suggestion changes are being debounced (pending processing)
+  const [isSuggestionPending, setIsSuggestionPending] = useState(false);
+  
+  // Track the last saved snapshot content to avoid duplicate saves
+  const lastSnapshotContentRef = useRef<string>("");
+  
+  // Save a clean snapshot of the document before suggestions are applied
+  const handleSnapshotBeforeEdit = useCallback((docJSON: Record<string, unknown>) => {
+    const cleanDoc = cleanDocumentJSON(docJSON);
+    const contentString = JSON.stringify(cleanDoc);
+    
+    // Skip if document content hasn't changed since last snapshot
+    if (contentString === lastSnapshotContentRef.current) {
+      console.log('[Editor] Snapshot skipped (content unchanged)');
+      return;
+    }
+    
+    lastSnapshotContentRef.current = contentString;
+    console.log('[Editor] Saving clean snapshot before edit');
+    
+    // Fire-and-forget POST to snapshots API
+    fetch(`/api/documents/${documentId}/snapshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: cleanDoc }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Snapshot API returned ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (data.skipped) {
+          console.log('[Editor] Snapshot skipped (duplicate)');
+        } else {
+          console.log('[Editor] Snapshot saved:', data.snapshot?.id);
+        }
+      })
+      .catch((err) => {
+        console.error('[Editor] Failed to save snapshot:', err);
+      });
+  }, [documentId]);
   
   // Track pending thread operations with debounce
   const pendingThreadsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -177,6 +223,8 @@ export const Editor = ({ initialContent }: EditorProps) => {
         isOwner,
         userId: currentUser?.id || "",
         onCreateSuggestion: handleCreateSuggestion,
+        onPendingChange: setIsSuggestionPending,
+        onSnapshotBeforeEdit: handleSnapshotBeforeEdit,
       }),
       Table,
       TableCell,
@@ -207,7 +255,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
       }),
       TaskItem.configure({ nested: true }),
     ],
-  }, [isOwner, currentUser?.id, leftMargin, rightMargin, handleCreateSuggestion]);
+  }, [isOwner, currentUser?.id, leftMargin, rightMargin, handleCreateSuggestion, handleSnapshotBeforeEdit]);
 
   // Don't render editor until we have user data
   if (!currentUser) {
@@ -221,7 +269,14 @@ export const Editor = ({ initialContent }: EditorProps) => {
   return (
     <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible">
       <Ruler />
-      <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0">
+      <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0 relative">
+        {/* Suggestion pending indicator - shown during 1.5s debounce */}
+        {!isOwner && isSuggestionPending && (
+          <div className="suggestion-pending-indicator">
+            <span className="suggestion-pending-dot" />
+            <span>Tracking changes…</span>
+          </div>
+        )}
         <EditorContent editor={editor} />
         <Threads editor={editor} />
       </div>

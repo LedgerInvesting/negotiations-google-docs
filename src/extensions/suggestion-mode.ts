@@ -13,6 +13,8 @@ export interface SuggestionModeOptions {
     from: number;
     to: number;
   }) => Promise<string>; // Returns commentThreadId
+  onPendingChange?: (isPending: boolean) => void;
+  onSnapshotBeforeEdit?: (docJSON: Record<string, unknown>) => void;
 }
 
 function generateSuggestionId(): string {
@@ -285,11 +287,13 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
       isOwner: true,
       userId: "",
       onCreateSuggestion: undefined,
+      onPendingChange: undefined,
+      onSnapshotBeforeEdit: undefined,
     };
   },
 
   addProseMirrorPlugins() {
-    const { isOwner, userId, onCreateSuggestion } = this.options;
+    const { isOwner, userId, onCreateSuggestion, onPendingChange, onSnapshotBeforeEdit } = this.options;
 
     // If user is owner, no need to track changes
     if (isOwner) {
@@ -330,6 +334,10 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
             
             if (isSuggestionUpdate || isSuggestionThreadUpdate) {
               console.log('[SuggestionMode] Suggestion system transaction, updating baseline');
+              // If there was a pending debounce, signal that it's resolved
+              if (pluginState.debounceTimeout) {
+                onPendingChange?.(false);
+              }
               return {
                 previousDoc: newState.doc,
                 debounceTimeout: null,
@@ -348,6 +356,13 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 hasExistingTimeout: pluginState.debounceTimeout !== null,
               });
               
+              // Notify that changes are pending and capture snapshot
+              if (isStartingNewEdit) {
+                onPendingChange?.(true);
+                // Capture the clean document state before the edit
+                onSnapshotBeforeEdit?.(oldState.doc.toJSON() as Record<string, unknown>);
+              }
+              
               // Clear existing timeout
               if (pluginState.debounceTimeout) {
                 clearTimeout(pluginState.debounceTimeout);
@@ -355,6 +370,9 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
               
               // Set new timeout to compare and create suggestions
               const timeout = setTimeout(() => {
+                // Notify that pending changes are being processed
+                onPendingChange?.(false);
+                
                 console.log('[SuggestionMode] Debounce timer fired, starting comparison');
                 
                 const view = pluginState.viewRef;

@@ -18,6 +18,60 @@
   border-radius: 2px;
 }
 
+/* Suggestion pending indicator - floating pill during debounce */
+.suggestion-pending-indicator {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #15803d;
+  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.06);
+  z-index: 20;
+  animation: suggestion-pending-fade-in 0.2s ease-out;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.suggestion-pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  animation: suggestion-pending-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes suggestion-pending-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+@keyframes suggestion-pending-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* Suggestion threads panel - positioned alongside editor */
 .suggestion-threads-panel {
   position: absolute;
