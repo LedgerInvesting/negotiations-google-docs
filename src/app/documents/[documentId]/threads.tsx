@@ -9,10 +9,10 @@ import { acceptSuggestion, rejectSuggestion } from "@/lib/suggestion-helpers";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 
-export const Threads = ({ editor }: { editor: Editor | null }) => {
+export const Threads = ({ editor, onSnapshotSave }: { editor: Editor | null; onSnapshotSave?: () => void }) => {
   return (
     <ClientSideSuspense fallback={<></>}>
-      <ThreadsList editor={editor} />
+      <ThreadsList editor={editor} onSnapshotSave={onSnapshotSave} />
     </ClientSideSuspense>
   );
 };
@@ -43,7 +43,7 @@ function getSuggestionTopOffset(
   return markRect.top - containerRect.top;
 }
 
-export function ThreadsList({ editor }: { editor: Editor | null }) {
+export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null; onSnapshotSave?: () => void }) {
   const { threads } = useThreads({ query: { resolved: false } });
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
@@ -140,6 +140,8 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         status: "accepted",
       },
     });
+    // Save a clean snapshot after accepting (document content changed)
+    onSnapshotSave?.();
   };
 
   const handleReject = (
@@ -155,6 +157,8 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
         status: "rejected",
       },
     });
+    // Save a clean snapshot after rejecting (document content changed)
+    onSnapshotSave?.();
   };
 
   // Sort suggestion threads by their vertical position

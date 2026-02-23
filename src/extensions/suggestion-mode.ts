@@ -14,7 +14,6 @@ export interface SuggestionModeOptions {
     to: number;
   }) => Promise<string>; // Returns commentThreadId
   onPendingChange?: (isPending: boolean) => void;
-  onSnapshotBeforeEdit?: (docJSON: Record<string, unknown>) => void;
 }
 
 function generateSuggestionId(): string {
@@ -288,12 +287,11 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
       userId: "",
       onCreateSuggestion: undefined,
       onPendingChange: undefined,
-      onSnapshotBeforeEdit: undefined,
     };
   },
 
   addProseMirrorPlugins() {
-    const { isOwner, userId, onCreateSuggestion, onPendingChange, onSnapshotBeforeEdit } = this.options;
+    const { isOwner, userId, onCreateSuggestion, onPendingChange } = this.options;
 
     // If user is owner, no need to track changes
     if (isOwner) {
@@ -356,11 +354,9 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 hasExistingTimeout: pluginState.debounceTimeout !== null,
               });
               
-              // Notify that changes are pending and capture snapshot
+              // Notify that changes are pending
               if (isStartingNewEdit) {
                 onPendingChange?.(true);
-                // Capture the clean document state before the edit
-                onSnapshotBeforeEdit?.(oldState.doc.toJSON() as Record<string, unknown>);
               }
               
               // Clear existing timeout

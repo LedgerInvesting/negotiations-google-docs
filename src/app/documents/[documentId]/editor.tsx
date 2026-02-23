@@ -28,7 +28,7 @@ import Link from "@tiptap/extension-link";
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { useStorage, useSelf, useCreateThread } from "@liveblocks/react/suspense";
 import { useParams } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
 import { updateSuggestionThreadId } from "@/lib/suggestion-validators";
@@ -69,9 +69,13 @@ export const Editor = ({ initialContent }: EditorProps) => {
   
   // Track the last saved snapshot content to avoid duplicate saves
   const lastSnapshotContentRef = useRef<string>("");
+  const snapshotDebounceRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Save a clean snapshot of the document before suggestions are applied
-  const handleSnapshotBeforeEdit = useCallback((docJSON: Record<string, unknown>) => {
+  // Save a clean snapshot of the current document (owner-only, strips suggestion marks)
+  const saveCleanSnapshot = useCallback(() => {
+    if (!editorRef.current) return;
+    
+    const docJSON = editorRef.current.getJSON();
     const cleanDoc = cleanDocumentJSON(docJSON);
     const contentString = JSON.stringify(cleanDoc);
     
@@ -82,7 +86,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
     }
     
     lastSnapshotContentRef.current = contentString;
-    console.log('[Editor] Saving clean snapshot before edit');
+    console.log('[Editor] Saving clean owner snapshot');
     
     // Fire-and-forget POST to snapshots API
     fetch(`/api/documents/${documentId}/snapshots`, {
@@ -96,7 +100,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
       })
       .then((data) => {
         if (data.skipped) {
-          console.log('[Editor] Snapshot skipped (duplicate)');
+          console.log('[Editor] Snapshot skipped (duplicate on server)');
         } else {
           console.log('[Editor] Snapshot saved:', data.snapshot?.id);
         }
@@ -105,6 +109,17 @@ export const Editor = ({ initialContent }: EditorProps) => {
         console.error('[Editor] Failed to save snapshot:', err);
       });
   }, [documentId]);
+  
+  // Debounced snapshot save for owner edits (3 second debounce)
+  const debouncedSaveSnapshot = useCallback(() => {
+    if (snapshotDebounceRef.current) {
+      clearTimeout(snapshotDebounceRef.current);
+    }
+    snapshotDebounceRef.current = setTimeout(() => {
+      saveCleanSnapshot();
+      snapshotDebounceRef.current = null;
+    }, 3000);
+  }, [saveCleanSnapshot]);
   
   // Track pending thread operations with debounce
   const pendingThreadsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -224,7 +239,6 @@ export const Editor = ({ initialContent }: EditorProps) => {
         userId: currentUser?.id || "",
         onCreateSuggestion: handleCreateSuggestion,
         onPendingChange: setIsSuggestionPending,
-        onSnapshotBeforeEdit: handleSnapshotBeforeEdit,
       }),
       Table,
       TableCell,
@@ -255,7 +269,34 @@ export const Editor = ({ initialContent }: EditorProps) => {
       }),
       TaskItem.configure({ nested: true }),
     ],
-  }, [isOwner, currentUser?.id, leftMargin, rightMargin, handleCreateSuggestion, handleSnapshotBeforeEdit]);
+  }, [isOwner, currentUser?.id, leftMargin, rightMargin, handleCreateSuggestion]);
+
+  // Owner-only: listen to editor transactions and save snapshots on local doc changes
+  useEffect(() => {
+    if (!editor || !isOwner) return;
+    
+    const handleTransaction = ({ transaction }: { transaction: { docChanged: boolean; getMeta: (key: string) => unknown } }) => {
+      if (!transaction.docChanged) return;
+      
+      // Skip remote/suggestion system transactions — only snapshot owner's local edits
+      const isRemote = transaction.getMeta('y-sync$') || transaction.getMeta('yjs-update');
+      const isSuggestionSystem = transaction.getMeta('suggestionMode') || transaction.getMeta('suggestionThreadUpdate');
+      if (isRemote || isSuggestionSystem) return;
+      
+      debouncedSaveSnapshot();
+    };
+    
+    editor.on('transaction', handleTransaction);
+    
+    return () => {
+      editor.off('transaction', handleTransaction);
+      // Clear pending debounce on cleanup
+      if (snapshotDebounceRef.current) {
+        clearTimeout(snapshotDebounceRef.current);
+        snapshotDebounceRef.current = null;
+      }
+    };
+  }, [editor, isOwner, debouncedSaveSnapshot]);
 
   // Don't render editor until we have user data
   if (!currentUser) {
@@ -278,7 +319,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
           </div>
         )}
         <EditorContent editor={editor} />
-        <Threads editor={editor} />
+        <Threads editor={editor} onSnapshotSave={isOwner ? saveCleanSnapshot : undefined} />
       </div>
     </div>
   );
