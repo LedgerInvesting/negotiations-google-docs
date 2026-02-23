@@ -63,6 +63,14 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
     (t) => !t.metadata?.suggestionId
   );
 
+  // Debug: log filtering results
+  useEffect(() => {
+    console.log('[Threads] Total:', threads.length, 'Suggestion:', suggestionThreads.length, 'Regular:', regularThreads.length);
+    suggestionThreads.forEach(t => {
+      console.log('[Threads] Suggestion thread:', t.id, 'metadata:', JSON.stringify(t.metadata));
+    });
+  }, [threads, suggestionThreads, regularThreads]);
+
   // Calculate positions for suggestion threads
   const updatePositions = useCallback(() => {
     if (!editor || suggestionThreads.length === 0) return;

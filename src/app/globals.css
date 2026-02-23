@@ -18,12 +18,13 @@
   border-radius: 2px;
 }
 
-/* Suggestion threads panel */
+/* Suggestion threads panel - positioned alongside editor */
 .suggestion-threads-panel {
-  position: relative;
+  position: absolute;
+  right: 12px;
+  top: 0;
   max-width: 300px;
   width: 100%;
-  min-height: 100px;
 }
 
 .suggestion-thread-wrapper {
@@ -32,6 +33,14 @@
   overflow: hidden;
   background: white;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  z-index: 1;
+  transition: z-index 0s, box-shadow 0.15s ease;
+}
+
+.suggestion-thread-wrapper:hover,
+.suggestion-thread-wrapper:focus-within {
+  z-index: 10;
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
 }
 
 .suggestion-thread-label {
