@@ -2,10 +2,12 @@
 
 import { ClientSideSuspense, useThreads, useEditThreadMetadata } from "@liveblocks/react/suspense";
 import { AnchoredThreads, FloatingComposer, FloatingThreads } from "@liveblocks/react-tiptap";
+import { Thread } from "@liveblocks/react-ui";
 import { Editor } from "@tiptap/react";
 import { useSelf } from "@liveblocks/react/suspense";
 import { acceptSuggestion, rejectSuggestion } from "@/lib/suggestion-helpers";
 import { useEffect } from "react";
+import { CheckIcon, XIcon } from "lucide-react";
 
 export const Threads = ({ editor }: { editor: Editor | null }) => {
   return (
@@ -21,104 +23,101 @@ export function ThreadsList({ editor }: { editor: Editor | null }) {
   const isOwner = currentUser?.info?.isOwner === true;
   const editThreadMetadata = useEditThreadMetadata();
 
-  // Inject suggestion action buttons into thread UI
+  // Debug: log threads
   useEffect(() => {
-    if (!editor || !isOwner) return;
+    console.log('[Threads] All threads:', threads.length);
+    threads.forEach(t => {
+      console.log('[Threads] Thread:', t.id, 'metadata:', t.metadata);
+    });
+  }, [threads]);
 
-    const interval = setInterval(() => {
-      // Find all thread elements
-      const threadElements = document.querySelectorAll('[data-thread-id]');
-      
-      threadElements.forEach((threadEl) => {
-        const threadId = threadEl.getAttribute('data-thread-id');
-        if (!threadId) return;
+  // Separate suggestion threads from regular comment threads
+  const suggestionThreads = threads.filter(t => t.metadata?.suggestionId);
+  const regularThreads = threads.filter(t => !t.metadata?.suggestionId);
 
-        // Find the matching thread data
-        const thread = threads.find((t) => t.id === threadId);
-        if (!thread) return;
+  const handleAccept = (threadId: string, suggestionId: string, metadata: Record<string, unknown>) => {
+    if (!editor) return;
+    console.log('[Threads] Accepting suggestion:', suggestionId);
+    acceptSuggestion(editor, suggestionId);
+    editThreadMetadata({
+      threadId,
+      metadata: {
+        ...metadata,
+        status: "accepted",
+        resolved: true,
+      },
+    });
+  };
 
-        const suggestionId = thread.metadata?.suggestionId as string | undefined;
-        const status = thread.metadata?.status as string | undefined;
+  const handleReject = (threadId: string, suggestionId: string, metadata: Record<string, unknown>) => {
+    if (!editor) return;
+    console.log('[Threads] Rejecting suggestion:', suggestionId);
+    rejectSuggestion(editor, suggestionId);
+    editThreadMetadata({
+      threadId,
+      metadata: {
+        ...metadata,
+        status: "rejected",
+        resolved: true,
+      },
+    });
+  };
 
-        // Only add buttons for pending suggestions
-        if (!suggestionId || status !== "pending") return;
-
-        // Check if buttons already exist
-        if (threadEl.querySelector('.suggestion-actions')) return;
-
-        // Find the composer (where users type replies) - we want to put buttons above it
-        const threadComposer = threadEl.querySelector('.lb-tiptap-composer');
-        if (!threadComposer) return;
-
-        // Create button container
-        const actionDiv = document.createElement('div');
-        actionDiv.className = 'suggestion-actions flex gap-2 px-3 py-2 border-t border-b bg-gray-50';
-        actionDiv.innerHTML = `
-          <button class="accept-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white h-9 px-3 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            Accept ${thread.metadata?.changeType === 'insert' ? 'Insertion' : 'Deletion'}
-          </button>
-          <button class="reject-btn flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 bg-white h-9 px-3 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-            Reject ${thread.metadata?.changeType === 'insert' ? 'Insertion' : 'Deletion'}
-          </button>
-        `;
-
-        // Add event listeners
-        const acceptBtn = actionDiv.querySelector('.accept-btn');
-        const rejectBtn = actionDiv.querySelector('.reject-btn');
-
-        if (acceptBtn) {
-          acceptBtn.addEventListener('click', async () => {
-            console.log('[Threads] Accepting suggestion:', suggestionId);
-            acceptSuggestion(editor, suggestionId);
-            await editThreadMetadata({
-              threadId: thread.id,
-              metadata: {
-                ...thread.metadata,
-                status: "accepted",
-                resolved: true,
-              },
-            });
-          });
-        }
-
-        if (rejectBtn) {
-          rejectBtn.addEventListener('click', async () => {
-            console.log('[Threads] Rejecting suggestion:', suggestionId);
-            rejectSuggestion(editor, suggestionId);
-            await editThreadMetadata({
-              threadId: thread.id,
-              metadata: {
-                ...thread.metadata,
-                status: "rejected",
-                resolved: true,
-              },
-            });
-          });
-        }
-
-        // Insert buttons above the composer (before it in DOM)
-        threadComposer.parentNode?.insertBefore(actionDiv, threadComposer);
-      });
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [editor, isOwner, threads, editThreadMetadata]);
-
-  // Show ALL threads together (both suggestions and regular comments)
   return (
     <>
+      {/* Regular comment threads (anchored to text) */}
       <div className="anchored-threads">
-        <AnchoredThreads editor={editor} threads={threads} />
+        <AnchoredThreads editor={editor} threads={regularThreads} />
       </div>
-      
-      <FloatingThreads editor={editor} threads={threads} className="floating-threads" />
+
+      {/* Suggestion threads rendered with full Liveblocks Thread component */}
+      {suggestionThreads.length > 0 && (
+        <div className="suggestion-threads-panel">
+          {suggestionThreads.map((thread) => {
+            const suggestionId = thread.metadata?.suggestionId as string;
+            const changeType = thread.metadata?.changeType as string;
+            const status = thread.metadata?.status as string;
+
+            if (status !== "pending") return null;
+
+            return (
+              <div key={thread.id} className="suggestion-thread-wrapper">
+                {/* Label showing this is a suggestion */}
+                <div className="suggestion-thread-label">
+                  <span className={`suggestion-badge ${changeType === 'insert' ? 'suggestion-badge-insert' : 'suggestion-badge-delete'}`}>
+                    {changeType === 'insert' ? '+ Insertion' : '− Deletion'}
+                  </span>
+                </div>
+
+                {/* Full Liveblocks Thread component - supports commenting, replying */}
+                <Thread thread={thread} className="suggestion-thread" />
+
+                {/* Accept/Reject buttons for owners */}
+                {isOwner && (
+                  <div className="suggestion-actions-bar">
+                    <button
+                      className="suggestion-accept-btn"
+                      onClick={() => handleAccept(thread.id, suggestionId, thread.metadata as Record<string, unknown>)}
+                    >
+                      <CheckIcon className="w-4 h-4 mr-1.5" />
+                      Accept
+                    </button>
+                    <button
+                      className="suggestion-reject-btn"
+                      onClick={() => handleReject(thread.id, suggestionId, thread.metadata as Record<string, unknown>)}
+                    >
+                      <XIcon className="w-4 h-4 mr-1.5" />
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <FloatingThreads editor={editor} threads={regularThreads} className="floating-threads" />
       <FloatingComposer editor={editor} className="floating-composer" />
     </>
   );

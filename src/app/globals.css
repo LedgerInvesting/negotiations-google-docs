@@ -18,6 +18,116 @@
   border-radius: 2px;
 }
 
+/* Suggestion threads panel */
+.suggestion-threads-panel {
+  position: absolute;
+  right: 12px;
+  max-width: 300px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.suggestion-thread-wrapper {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+.suggestion-thread-label {
+  padding: 8px 12px 4px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.suggestion-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.suggestion-badge-insert {
+  color: #059669;
+  background-color: #d1fae5;
+}
+
+.suggestion-badge-delete {
+  color: #dc2626;
+  background-color: #fee2e2;
+}
+
+.suggestion-thread {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.suggestion-actions-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.suggestion-accept-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: #059669;
+  color: white;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.suggestion-accept-btn:hover {
+  background-color: #047857;
+}
+
+.suggestion-reject-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: white;
+  color: #dc2626;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #fca5a5;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.suggestion-reject-btn:hover {
+  background-color: #fef2f2;
+}
+
+@media (max-width: 640px) {
+  .suggestion-threads-panel {
+    position: fixed;
+    right: 8px;
+    top: 80px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    z-index: 50;
+  }
+}
+
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
