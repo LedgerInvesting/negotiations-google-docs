@@ -128,10 +128,11 @@ export const Editor = ({ initialContent }: EditorProps) => {
   // Callback to create comment threads for suggestions with debouncing
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace";
+    type: "insert" | "delete" | "replace" | "format";
     text: string;
     oldText?: string;
     newText?: string;
+    description?: string;
     from: number;
     to: number;
   }) => {
@@ -149,10 +150,15 @@ export const Editor = ({ initialContent }: EditorProps) => {
         try {
           console.log('[Editor] Creating thread (debounced):', data.suggestionId);
           
-          const label =
-            data.type === "replace"
-              ? `Replace "${(data.oldText ?? "").substring(0, 50)}${(data.oldText ?? "").length > 50 ? "..." : ""}" with "${(data.newText ?? "").substring(0, 50)}${(data.newText ?? "").length > 50 ? "..." : ""}"`
-              : `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
+          let label: string;
+          if (data.type === "replace") {
+            label = `Replace "${(data.oldText ?? "").substring(0, 50)}${(data.oldText ?? "").length > 50 ? "..." : ""}" with "${(data.newText ?? "").substring(0, 50)}${(data.newText ?? "").length > 50 ? "..." : ""}"`;
+          } else if (data.type === "format") {
+            const truncText = data.text.substring(0, 40) + (data.text.length > 40 ? "…" : "");
+            label = `Format "${truncText}": ${data.description ?? "style change"}`;
+          } else {
+            label = `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
+          }
 
           const thread = await createThread({
             body: {

@@ -212,14 +212,18 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                         ? "suggestion-badge-insert"
                         : changeType === "replace"
                           ? "suggestion-badge-replace"
-                          : "suggestion-badge-delete"
+                          : changeType === "format"
+                            ? "suggestion-badge-format"
+                            : "suggestion-badge-delete"
                     }`}
                   >
                     {changeType === "insert"
                       ? "+ Insertion"
                       : changeType === "replace"
                         ? "⇄ Replace"
-                        : "− Deletion"}
+                        : changeType === "format"
+                          ? "🎨 Format"
+                          : "− Deletion"}
                   </span>
                 </div>
 

@@ -2,17 +2,18 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
-import { ReplaceAroundStep, ReplaceStep, type Mapping } from "@tiptap/pm/transform";
+import { AddMarkStep, RemoveMarkStep, ReplaceAroundStep, ReplaceStep, type Mapping } from "@tiptap/pm/transform";
 
 export interface SuggestionModeOptions {
   isOwner: boolean;
   userId: string;
   onCreateSuggestion?: (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace";
+    type: "insert" | "delete" | "replace" | "format";
     text: string;
     oldText?: string;
     newText?: string;
+    description?: string;
     from: number;
     to: number;
   }) => Promise<string>; // Returns commentThreadId
@@ -48,7 +49,80 @@ interface ReplaceChange {
   newText: string;
 }
 
-type DocChange = InsertChange | DeleteChange | ReplaceChange;
+/** Serialised representation of a single text node's marks (excluding suggestion marks). */
+interface OldTextNode {
+  text: string;
+  marks: Array<{ type: string; attrs: Record<string, unknown> }>;
+}
+
+interface FormatChange {
+  type: "format";
+  from: number;
+  to: number;
+  text: string;
+  description: string;
+  oldNodes: OldTextNode[];
+}
+
+type DocChange = InsertChange | DeleteChange | ReplaceChange | FormatChange;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Human-readable label for a mark step (e.g. "Bold", "Font: Arial"). */
+function describeFormatStep(isAdd: boolean, mark: { type: { name: string }; attrs: Record<string, unknown> }): string {
+  const prefix = isAdd ? "" : "Remove ";
+  switch (mark.type.name) {
+    case "bold":
+      return `${prefix}Bold`;
+    case "italic":
+      return `${prefix}Italic`;
+    case "underline":
+      return `${prefix}Underline`;
+    case "strike":
+      return `${prefix}Strikethrough`;
+    case "code":
+      return `${prefix}Code`;
+    case "highlight": {
+      const color = mark.attrs.color as string | undefined;
+      return color ? `${prefix}Highlight (${color})` : `${prefix}Highlight`;
+    }
+    case "textStyle": {
+      const parts: string[] = [];
+      if (mark.attrs.fontFamily) parts.push(`Font: ${mark.attrs.fontFamily}`);
+      if (mark.attrs.fontSize) parts.push(`Size: ${mark.attrs.fontSize}`);
+      if (mark.attrs.color) parts.push(`Color: ${mark.attrs.color}`);
+      if (parts.length === 0) return `${prefix}Text style`;
+      return prefix + parts.join(", ");
+    }
+    default:
+      return `${prefix}${mark.type.name}`;
+  }
+}
+
+/** Capture the text nodes (with their marks, excluding suggestion marks) in a range of a document. */
+function captureOldTextNodes(doc: ProseMirrorNode, from: number, to: number): OldTextNode[] {
+  const nodes: OldTextNode[] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (node.isText && node.text) {
+      const start = Math.max(pos, from);
+      const end = Math.min(pos + node.nodeSize, to);
+      const sliceText = node.text.slice(start - pos, end - pos);
+      const marks = node.marks
+        .filter((m) => m.type.name !== "suggestionInsert" && m.type.name !== "suggestionDelete")
+        .map((m) => ({ type: m.type.name, attrs: m.attrs as Record<string, unknown> }));
+      if (sliceText.length > 0) {
+        nodes.push({ text: sliceText, marks });
+      }
+    }
+  });
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// Position mapping
+// ---------------------------------------------------------------------------
 
 function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
   if (change.type === "insert") {
@@ -68,7 +142,15 @@ function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
     };
   }
 
-  // delete suggestions are represented as “insert deleted text at `from` with delete mark”
+  if (change.type === "format") {
+    return {
+      ...change,
+      from: mapping.map(change.from, 1),
+      to: mapping.map(change.to, -1),
+    };
+  }
+
+  // delete suggestions are represented as "insert deleted text at `from` with delete mark"
   const mappedPos = mapping.map(change.from, 1);
   return {
     ...change,
@@ -76,6 +158,10 @@ function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
     to: mappedPos,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Merging adjacent / overlapping changes
+// ---------------------------------------------------------------------------
 
 function mergeDocChanges(changes: DocChange[]): DocChange[] {
   const merged: DocChange[] = [];
@@ -118,28 +204,97 @@ function mergeDocChanges(changes: DocChange[]): DocChange[] {
       continue;
     }
 
+    // Merge format changes on the same range (e.g. bold + italic applied in quick succession)
+    if (
+      prev.type === "format" &&
+      change.type === "format" &&
+      prev.from === change.from &&
+      prev.to === change.to
+    ) {
+      // Keep the earliest old content, combine descriptions
+      prev.description = `${prev.description}, ${change.description}`;
+      continue;
+    }
+
     merged.push(change);
   }
 
   return merged;
 }
 
+// ---------------------------------------------------------------------------
+// Extract changes from a transaction
+// ---------------------------------------------------------------------------
+
 function extractChangesFromTransaction(tr: Transaction): DocChange[] {
-  // This intentionally relies on the transaction’s steps, not a string diff.
-  // String diffing is ambiguous with repeated characters (the root cause of the “first/last letter ignored” bug).
   const changes: DocChange[] = [];
 
   let docBeforeStep: ProseMirrorNode = tr.before;
 
   tr.steps.forEach((step, stepIndex) => {
-    // We only create suggestions for content replacement steps (typing, pasting, deleting).
+    // ---------------------------------------------------------------
+    // Formatting steps (AddMarkStep / RemoveMarkStep)
+    // ---------------------------------------------------------------
+    if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+      const result = step.apply(docBeforeStep);
+      if (!result.doc) {
+        console.warn("[SuggestionMode] Mark step apply failed, skipping", result.failed);
+        return;
+      }
+      const docAfterStep = result.doc;
+
+      // If the step didn't actually change the doc (mark already present / absent), skip.
+      if (docBeforeStep.eq(docAfterStep)) {
+        docBeforeStep = docAfterStep;
+        return;
+      }
+
+      const stepFrom = step.from;
+      const stepTo = step.to;
+      const mark = step.mark;
+
+      const text = docBeforeStep.textBetween(stepFrom, stepTo, "\n", "\n");
+      if (text.length === 0) {
+        docBeforeStep = docAfterStep;
+        return;
+      }
+
+      // Map positions to the *final* document of this transaction.
+      const mapFromAfterStepToEnd = tr.mapping.slice(stepIndex + 1);
+      const mappedFrom = mapFromAfterStepToEnd.map(stepFrom, 1);
+      const mappedTo = mapFromAfterStepToEnd.map(stepTo, -1);
+
+      // Capture old text nodes with their original marks.
+      const oldNodes = captureOldTextNodes(docBeforeStep, stepFrom, stepTo);
+
+      const isAdd = step instanceof AddMarkStep;
+      const description = describeFormatStep(isAdd, mark);
+
+      changes.push({
+        type: "format",
+        from: mappedFrom,
+        to: mappedTo,
+        text,
+        description,
+        oldNodes,
+      });
+
+      docBeforeStep = docAfterStep;
+      return;
+    }
+
+    // ---------------------------------------------------------------
+    // Non-content steps we don't handle — keep baseline in sync.
+    // ---------------------------------------------------------------
     if (!(step instanceof ReplaceStep) && !(step instanceof ReplaceAroundStep)) {
-      // Keep docBeforeStep in sync for subsequent steps.
       const result = step.apply(docBeforeStep);
       if (result.doc) docBeforeStep = result.doc;
       return;
     }
 
+    // ---------------------------------------------------------------
+    // Content replacement steps (typing, pasting, deleting)
+    // ---------------------------------------------------------------
     const result = step.apply(docBeforeStep);
     if (!result.doc) {
       console.warn("[SuggestionMode] Step apply failed, skipping", result.failed);
@@ -150,7 +305,6 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
     const stepMap = step.getMap();
 
     // Map positions produced by this step into the *final* document of this transaction.
-    const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
     const mapFromAfterStepToEnd = tr.mapping.slice(stepIndex + 1);
 
     stepMap.forEach((from, to, newFrom, newTo) => {
@@ -161,9 +315,8 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         newTo > newFrom ? docAfterStep.textBetween(newFrom, newTo, "\n", "\n") : "";
 
       // Replacement: user replaced an existing range with new content.
-      // Represent as a single logical change so it becomes one thread
-      // and one suggestionId controlling both insert+delete marks.
       if (deletedText.length > 0 && insertedText.length > 0) {
+        const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
         const deletePos = mapFromBeforeStepToEnd.map(from, 1);
         const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
         const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
@@ -179,8 +332,9 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         return;
       }
 
-      // Deletions: user removed content; we’ll re-insert it with a delete mark when the debounce completes.
+      // Deletions
       if (deletedText.length > 0) {
+        const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
         const deletePos = mapFromBeforeStepToEnd.map(from, 1);
         changes.push({
           type: "delete",
@@ -190,7 +344,7 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         });
       }
 
-      // Insertions: user inserted content; it already exists in the doc, we’ll just add an insert mark.
+      // Insertions
       if (insertedText.length > 0) {
         const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
         const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
@@ -209,9 +363,10 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
   return changes;
 }
 
-/**
- * Create suggestions for detected changes
- */
+// ---------------------------------------------------------------------------
+// Create suggestion marks + threads for detected changes
+// ---------------------------------------------------------------------------
+
 function createSuggestionsForChanges(
   view: EditorView,
   changes: DocChange[],
@@ -232,15 +387,16 @@ function createSuggestionsForChanges(
   
   console.log('[SuggestionMode] Creating suggestions for', changes.length, 'changes');
 
+  const schema = view.state.schema;
+
   // IMPORTANT: apply insert marks before inserting delete-suggestion text.
   // Inserting deleted text shifts document positions; marking first ensures marks stay attached.
   const replaceChanges = changes.filter((c) => c.type === "replace") as ReplaceChange[];
+  const formatChanges = changes.filter((c) => c.type === "format") as FormatChange[];
   const insertChanges = changes.filter((c) => c.type === "insert") as InsertChange[];
   const deleteChanges = changes.filter((c) => c.type === "delete") as DeleteChange[];
 
-  // Replacements become one suggestionId controlling BOTH:
-  // - insert mark over the new content
-  // - re-inserted old content with delete mark
+  // ------- Replace changes -------
   replaceChanges.forEach((change) => {
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
@@ -272,8 +428,7 @@ function createSuggestionsForChanges(
     tr.addMark(change.insertFrom, change.insertTo, insertMark);
 
     // 2) Re-insert the old text at the same position, marked as deletion.
-    // This produces a visible "old (strikethrough)" + "new (green)" pair.
-    const oldTextNode = view.state.schema.text(change.oldText, [deleteMark]);
+    const oldTextNode = schema.text(change.oldText, [deleteMark]);
     tr.insert(change.from, oldTextNode);
 
     // Create ONE thread for the replacement.
@@ -296,12 +451,75 @@ function createSuggestionsForChanges(
     }
   });
 
+  // ------- Format changes -------
+  formatChanges.forEach((change) => {
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+    const commentThreadId = `temp-${suggestionId}`;
+
+    const insertMark = suggestionInsertType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+    const deleteMark = suggestionDeleteType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+
+    console.log('[SuggestionMode] Adding format marks:', {
+      suggestionId,
+      from: change.from,
+      to: change.to,
+      text: change.text.substring(0, 50),
+      description: change.description,
+    });
+
+    // 1) Mark the existing (newly formatted) text as an insertion suggestion.
+    tr.addMark(change.from, change.to, insertMark);
+
+    // 2) Insert old text nodes at change.from with their original marks + delete mark.
+    //    We build the nodes in forward order and insert them all at once.
+    const oldTextNodes = change.oldNodes.flatMap(({ text, marks }) => {
+      const resolvedMarks = marks.flatMap((m) => {
+        const markType = schema.marks[m.type];
+        return markType ? [markType.create(m.attrs)] : [];
+      });
+      return [schema.text(text, [...resolvedMarks, deleteMark])];
+    });
+
+    if (oldTextNodes.length > 0) {
+      tr.insert(change.from, oldTextNodes);
+    }
+
+    // Create ONE thread for the format change.
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
+        suggestionId,
+        type: "format",
+        text: change.text,
+        description: change.description,
+        from: change.from,
+        to: change.to,
+      })
+        .then((threadId) => {
+          console.log('[SuggestionMode] Thread created for format:', threadId);
+        })
+        .catch((error: unknown) => {
+          console.error("[SuggestionMode] Failed to create comment thread:", error);
+        });
+    }
+  });
+
+  // ------- Insert changes -------
   insertChanges.forEach((change) => {
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
     const commentThreadId = `temp-${suggestionId}`;
     
-    // Add insert suggestion mark
     const mark = suggestionInsertType.create({
       suggestionId,
       userId,
@@ -318,7 +536,6 @@ function createSuggestionsForChanges(
 
     tr.addMark(change.from, change.to, mark);
 
-    // Create thread asynchronously
     if (onCreateSuggestion) {
       onCreateSuggestion({
         suggestionId,
@@ -336,12 +553,12 @@ function createSuggestionsForChanges(
     }
   });
 
+  // ------- Delete changes -------
   deleteChanges.forEach((change) => {
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
     const commentThreadId = `temp-${suggestionId}`;
 
-    // Insert the deleted text back with delete suggestion mark
     const mark = suggestionDeleteType.create({
       suggestionId,
       userId,
@@ -355,10 +572,9 @@ function createSuggestionsForChanges(
       text: change.text.substring(0, 50),
     });
 
-    const textNode = view.state.schema.text(change.text, [mark]);
+    const textNode = schema.text(change.text, [mark]);
     tr.insert(change.from, textNode);
 
-    // Create thread asynchronously
     if (onCreateSuggestion) {
       onCreateSuggestion({
         suggestionId,
@@ -380,6 +596,10 @@ function createSuggestionsForChanges(
   console.log('[SuggestionMode] Dispatching transaction with suggestions');
   view.dispatch(tr);
 }
+
+// ---------------------------------------------------------------------------
+// Extension
+// ---------------------------------------------------------------------------
 
 export const SuggestionMode = Extension.create<SuggestionModeOptions>({
   name: "suggestionMode",
@@ -455,7 +675,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
               const baselineDoc = isStartingNewEdit ? oldState.doc : pluginState.previousDoc;
               const mappedExistingChanges = isStartingNewEdit
                 ? ([] as DocChange[])
-                : pluginState.pendingChanges.map((c) => mapDocChange(c, tr.mapping));
+                : pluginState.pendingChanges.map((c: DocChange) => mapDocChange(c, tr.mapping));
 
               const extractedChanges = extractChangesFromTransaction(tr);
               const pendingChanges = mergeDocChanges([
