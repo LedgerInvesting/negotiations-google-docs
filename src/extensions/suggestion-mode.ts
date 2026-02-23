@@ -1,7 +1,8 @@
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
+import { ReplaceAroundStep, ReplaceStep, type Mapping } from "@tiptap/pm/transform";
 
 export interface SuggestionModeOptions {
   isOwner: boolean;
@@ -27,154 +28,121 @@ interface DocChange {
   text: string;
 }
 
-/**
- * Extract clean text from document, excluding current user's suggestions
- */
-function getCleanText(doc: ProseMirrorNode, userId: string): string {
-  let text = "";
-  doc.descendants((node) => {
-    if (node.isText) {
-      // Check if this text has a suggestion mark from the current user
-      const hasSuggestionFromUser = node.marks.some(
-        mark => 
-          (mark.type.name === "suggestionInsert" || mark.type.name === "suggestionDelete") &&
-          mark.attrs.userId === userId
-      );
-      
-      // Only include text that doesn't have a suggestion from this user
-      if (!hasSuggestionFromUser) {
-        text += node.text || "";
-      }
-    }
-  });
-  return text;
+function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
+  if (change.type === "insert") {
+    return {
+      ...change,
+      from: mapping.map(change.from, 1),
+      to: mapping.map(change.to, -1),
+    };
+  }
+
+  // delete suggestions are represented as “insert deleted text at `from` with delete mark”
+  const mappedPos = mapping.map(change.from, 1);
+  return {
+    ...change,
+    from: mappedPos,
+    to: mappedPos,
+  };
 }
 
-/**
- * Convert text position to document position, accounting for document structure
- */
-function textPosToDocPos(doc: ProseMirrorNode, textPos: number, userId: string): number {
-  let currentTextPos = 0;
-  let docPos = 1; // Start at 1 to account for document node
-  
-  let found = false;
-  doc.descendants((node, pos) => {
-    if (found) return false;
-    
-    if (node.isText) {
-      const hasSuggestionFromUser = node.marks.some(
-        mark => 
-          (mark.type.name === "suggestionInsert" || mark.type.name === "suggestionDelete") &&
-          mark.attrs.userId === userId
-      );
-      
-      if (!hasSuggestionFromUser) {
-        const nodeLength = node.text?.length || 0;
-        if (currentTextPos + nodeLength >= textPos) {
-          docPos = pos + (textPos - currentTextPos);
-          found = true;
-          return false;
-        }
-        currentTextPos += nodeLength;
-      }
+function mergeDocChanges(changes: DocChange[]): DocChange[] {
+  const merged: DocChange[] = [];
+
+  for (const change of changes) {
+    const prev = merged[merged.length - 1];
+    if (!prev) {
+      merged.push(change);
+      continue;
     }
-  });
-  
-  return found ? docPos : doc.content.size;
+
+    // Merge adjacent inserts (typing produces a stream of small insert steps)
+    if (
+      prev.type === "insert" &&
+      change.type === "insert" &&
+      prev.to === change.from
+    ) {
+      prev.to = change.to;
+      prev.text += change.text;
+      continue;
+    }
+
+    // Merge backspace-like deletes: after mapping, they typically converge on the same insertion point.
+    // When that happens, prepend the newer deleted text (it was deleted closer to the start).
+    if (prev.type === "delete" && change.type === "delete" && prev.from === change.from) {
+      prev.text = change.text + prev.text;
+      continue;
+    }
+
+    merged.push(change);
+  }
+
+  return merged;
 }
 
-/**
- * Compare two document states and return the differences
- * Uses a simple but effective prefix/suffix matching algorithm
- */
-function compareDocuments(oldDoc: ProseMirrorNode, newDoc: ProseMirrorNode, userId: string): DocChange[] {
+function extractChangesFromTransaction(tr: Transaction): DocChange[] {
+  // This intentionally relies on the transaction’s steps, not a string diff.
+  // String diffing is ambiguous with repeated characters (the root cause of the “first/last letter ignored” bug).
   const changes: DocChange[] = [];
-  
-  const oldText = getCleanText(oldDoc, userId);
-  const newText = getCleanText(newDoc, userId);
-  
-  console.log('[SuggestionMode] Comparing documents:', {
-    oldTextLength: oldText.length,
-    newTextLength: newText.length,
-    oldTextPreview: oldText.substring(0, 100),
-    newTextPreview: newText.substring(0, 100),
+
+  let docBeforeStep: ProseMirrorNode = tr.before;
+
+  tr.steps.forEach((step, stepIndex) => {
+    // We only create suggestions for content replacement steps (typing, pasting, deleting).
+    if (!(step instanceof ReplaceStep) && !(step instanceof ReplaceAroundStep)) {
+      // Keep docBeforeStep in sync for subsequent steps.
+      const result = step.apply(docBeforeStep);
+      if (result.doc) docBeforeStep = result.doc;
+      return;
+    }
+
+    const result = step.apply(docBeforeStep);
+    if (!result.doc) {
+      console.warn("[SuggestionMode] Step apply failed, skipping", result.failed);
+      return;
+    }
+    const docAfterStep = result.doc;
+
+    const stepMap = step.getMap();
+
+    // Map positions produced by this step into the *final* document of this transaction.
+    const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
+    const mapFromAfterStepToEnd = tr.mapping.slice(stepIndex + 1);
+
+    stepMap.forEach((from, to, newFrom, newTo) => {
+      const deletedText =
+        to > from ? docBeforeStep.textBetween(from, to, "\n", "\n") : "";
+
+      const insertedText =
+        newTo > newFrom ? docAfterStep.textBetween(newFrom, newTo, "\n", "\n") : "";
+
+      // Deletions: user removed content; we’ll re-insert it with a delete mark when the debounce completes.
+      if (deletedText.length > 0) {
+        const deletePos = mapFromBeforeStepToEnd.map(from, 1);
+        changes.push({
+          type: "delete",
+          from: deletePos,
+          to: deletePos,
+          text: deletedText,
+        });
+      }
+
+      // Insertions: user inserted content; it already exists in the doc, we’ll just add an insert mark.
+      if (insertedText.length > 0) {
+        const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
+        const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
+        changes.push({
+          type: "insert",
+          from: insertFrom,
+          to: insertTo,
+          text: insertedText,
+        });
+      }
+    });
+
+    docBeforeStep = docAfterStep;
   });
-  
-  // Find common prefix
-  let prefixLen = 0;
-  while (
-    prefixLen < oldText.length &&
-    prefixLen < newText.length &&
-    oldText[prefixLen] === newText[prefixLen]
-  ) {
-    prefixLen++;
-  }
-  
-  // Find common suffix
-  let suffixLen = 0;
-  while (
-    suffixLen < oldText.length - prefixLen &&
-    suffixLen < newText.length - prefixLen &&
-    oldText[oldText.length - 1 - suffixLen] === newText[newText.length - 1 - suffixLen]
-  ) {
-    suffixLen++;
-  }
-  
-  const oldMiddle = oldText.substring(prefixLen, oldText.length - suffixLen);
-  const newMiddle = newText.substring(prefixLen, newText.length - suffixLen);
-  
-  console.log('[SuggestionMode] Change detection:', {
-    prefixLen,
-    suffixLen,
-    oldMiddle: oldMiddle.length > 0 ? `"${oldMiddle}"` : '(empty)',
-    newMiddle: newMiddle.length > 0 ? `"${newMiddle}"` : '(empty)',
-  });
-  
-  // No changes detected
-  if (oldMiddle.length === 0 && newMiddle.length === 0) {
-    console.log('[SuggestionMode] No changes detected');
-    return changes;
-  }
-  
-  // Convert text position to document position
-  const changePos = textPosToDocPos(newDoc, prefixLen, userId);
-  
-  // Determine what changed
-  if (oldMiddle.length > 0 && newMiddle.length === 0) {
-    // Deletion only
-    console.log('[SuggestionMode] Deletion detected:', oldMiddle);
-    changes.push({
-      type: "delete",
-      from: changePos,
-      to: changePos,
-      text: oldMiddle,
-    });
-  } else if (oldMiddle.length === 0 && newMiddle.length > 0) {
-    // Insertion only
-    console.log('[SuggestionMode] Insertion detected:', newMiddle);
-    changes.push({
-      type: "insert",
-      from: changePos,
-      to: changePos + newMiddle.length,
-      text: newMiddle,
-    });
-  } else if (oldMiddle.length > 0 && newMiddle.length > 0) {
-    // Both deletion and insertion (replacement)
-    console.log('[SuggestionMode] Replacement detected:', { old: oldMiddle, new: newMiddle });
-    changes.push({
-      type: "delete",
-      from: changePos,
-      to: changePos,
-      text: oldMiddle,
-    });
-    changes.push({
-      type: "insert",
-      from: changePos,
-      to: changePos + newMiddle.length,
-      text: newMiddle,
-    });
-  }
-  
+
   return changes;
 }
 
@@ -200,76 +168,89 @@ function createSuggestionsForChanges(
   }
   
   console.log('[SuggestionMode] Creating suggestions for', changes.length, 'changes');
-  
-  changes.forEach((change) => {
+
+  // IMPORTANT: apply insert marks before inserting delete-suggestion text.
+  // Inserting deleted text shifts document positions; marking first ensures marks stay attached.
+  const insertChanges = changes.filter((c) => c.type === "insert");
+  const deleteChanges = changes.filter((c) => c.type === "delete");
+
+  insertChanges.forEach((change) => {
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
     const commentThreadId = `temp-${suggestionId}`;
     
-    if (change.type === "insert") {
-      // Add insert suggestion mark
-      const mark = suggestionInsertType.create({
+    // Add insert suggestion mark
+    const mark = suggestionInsertType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+
+    console.log('[SuggestionMode] Adding insert mark:', {
+      suggestionId,
+      from: change.from,
+      to: change.to,
+      text: change.text.substring(0, 50),
+    });
+
+    tr.addMark(change.from, change.to, mark);
+
+    // Create thread asynchronously
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
         suggestionId,
-        userId,
-        commentThreadId,
-        timestamp,
-      });
-      
-      console.log('[SuggestionMode] Adding insert mark:', {
-        suggestionId,
+        type: "insert",
+        text: change.text,
         from: change.from,
         to: change.to,
-        text: change.text.substring(0, 50),
-      });
-      
-      tr.addMark(change.from, change.to, mark);
-      
-      // Create thread asynchronously
-      if (onCreateSuggestion) {
-        onCreateSuggestion({
-          suggestionId,
-          type: "insert",
-          text: change.text,
-          from: change.from,
-          to: change.to,
-        }).then((threadId) => {
+      })
+        .then((threadId) => {
           console.log('[SuggestionMode] Thread created for insert:', threadId);
-        }).catch((error: unknown) => {
+        })
+        .catch((error: unknown) => {
           console.error("[SuggestionMode] Failed to create comment thread:", error);
         });
-      }
-    } else if (change.type === "delete") {
-      // Insert the deleted text back with delete suggestion mark
-      const mark = suggestionDeleteType.create({
+    }
+  });
+
+  deleteChanges.forEach((change) => {
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+    const commentThreadId = `temp-${suggestionId}`;
+
+    // Insert the deleted text back with delete suggestion mark
+    const mark = suggestionDeleteType.create({
+      suggestionId,
+      userId,
+      commentThreadId,
+      timestamp,
+    });
+
+    console.log('[SuggestionMode] Adding delete mark:', {
+      suggestionId,
+      position: change.from,
+      text: change.text.substring(0, 50),
+    });
+
+    const textNode = view.state.schema.text(change.text, [mark]);
+    tr.insert(change.from, textNode);
+
+    // Create thread asynchronously
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
         suggestionId,
-        userId,
-        commentThreadId,
-        timestamp,
-      });
-      
-      console.log('[SuggestionMode] Adding delete mark:', {
-        suggestionId,
-        position: change.from,
-        text: change.text.substring(0, 50),
-      });
-      
-      const textNode = view.state.schema.text(change.text, [mark]);
-      tr.insert(change.from, textNode);
-      
-      // Create thread asynchronously
-      if (onCreateSuggestion) {
-        onCreateSuggestion({
-          suggestionId,
-          type: "delete",
-          text: change.text,
-          from: change.from,
-          to: change.from,
-        }).then((threadId) => {
+        type: "delete",
+        text: change.text,
+        from: change.from,
+        to: change.from,
+      })
+        .then((threadId) => {
           console.log('[SuggestionMode] Thread created for delete:', threadId);
-        }).catch((error: unknown) => {
+        })
+        .catch((error: unknown) => {
           console.error("[SuggestionMode] Failed to create comment thread:", error);
         });
-      }
     }
   });
   
@@ -314,6 +295,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
             return {
               previousDoc: state.doc,
               debounceTimeout: null as NodeJS.Timeout | null,
+              pendingChanges: [] as DocChange[],
               isProcessing: false,
               viewRef: null as EditorView | null,
             };
@@ -339,6 +321,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
               return {
                 previousDoc: newState.doc,
                 debounceTimeout: null,
+                pendingChanges: [],
                 isProcessing: false,
                 viewRef: pluginState.viewRef,
               };
@@ -348,10 +331,21 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
             if (tr.docChanged && !pluginState.isProcessing) {
               const isStartingNewEdit = pluginState.debounceTimeout === null;
               const baselineDoc = isStartingNewEdit ? oldState.doc : pluginState.previousDoc;
+              const mappedExistingChanges = isStartingNewEdit
+                ? ([] as DocChange[])
+                : pluginState.pendingChanges.map((c) => mapDocChange(c, tr.mapping));
+
+              const extractedChanges = extractChangesFromTransaction(tr);
+              const pendingChanges = mergeDocChanges([
+                ...mappedExistingChanges,
+                ...extractedChanges,
+              ]);
               
               console.log('[SuggestionMode] User edit detected:', {
                 isStartingNewEdit,
                 hasExistingTimeout: pluginState.debounceTimeout !== null,
+                extractedChanges: extractedChanges.length,
+                pendingChanges: pendingChanges.length,
               });
               
               // Notify that changes are pending
@@ -386,11 +380,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 }
                 
                 // Compare documents
-                const changes = compareDocuments(
-                  currentPluginState.previousDoc,
-                  currentState.doc,
-                  userId
-                );
+                const changes = currentPluginState.pendingChanges as DocChange[];
                 
                 if (changes.length === 0) {
                   console.log('[SuggestionMode] No changes to convert to suggestions');
@@ -409,6 +399,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
               return {
                 previousDoc: baselineDoc,
                 debounceTimeout: timeout,
+                pendingChanges,
                 isProcessing: false,
                 viewRef: pluginState.viewRef,
               };
