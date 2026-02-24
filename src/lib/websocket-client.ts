@@ -12,7 +12,7 @@ export interface DocumentEvent {
 export function useWebSocket(onMessage?: (event: DocumentEvent) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout>(undefined);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
   
