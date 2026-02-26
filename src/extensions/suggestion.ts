@@ -22,6 +22,10 @@ declare module "@tiptap/core" {
 export const SuggestionInsert = Mark.create<SuggestionOptions>({
   name: "suggestionInsert",
 
+  excludes: "",
+
+  inclusive: false,
+
   addOptions() {
     return {
       HTMLAttributes: {},
@@ -339,6 +343,10 @@ export const SuggestionInsert = Mark.create<SuggestionOptions>({
 
 export const SuggestionDelete = Mark.create<SuggestionOptions>({
   name: "suggestionDelete",
+
+  excludes: "",
+
+  inclusive: false,
 
   addOptions() {
     return {
