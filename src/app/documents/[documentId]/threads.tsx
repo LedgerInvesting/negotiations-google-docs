@@ -20,6 +20,7 @@ export const Threads = ({ editor, onSnapshotSave }: { editor: Editor | null; onS
 /**
  * Find the vertical position (top offset) of a suggestion mark in the editor
  * by looking for the DOM element with the matching suggestion ID.
+ * The offset is relative to the threads panel container.
  */
 function getSuggestionTopOffset(
   editor: Editor | null,

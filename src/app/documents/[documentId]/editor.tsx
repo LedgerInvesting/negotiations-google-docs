@@ -322,17 +322,23 @@ export const Editor = ({ initialContent }: EditorProps) => {
 
   return (
     <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible">
-      <Ruler />
-      <div className="min-w-max flex justify-center w-[816px] py-4 print:py-0 mx-auto print:w-full print:min-w-0 relative">
-        {/* Suggestion pending indicator - shown during 1.5s debounce */}
-        {!isOwner && isSuggestionPending && (
-          <div className="suggestion-pending-indicator">
-            <span className="suggestion-pending-dot" />
-            <span>Tracking changes…</span>
+      <div className="flex justify-center print:py-0 mx-auto print:w-full print:min-w-0">
+        <div className="min-w-max w-[816px]">
+          <Ruler />
+          <div className="relative py-4 print:py-0">
+            {/* Suggestion pending indicator - shown during 1.5s debounce */}
+            {!isOwner && isSuggestionPending && (
+              <div className="suggestion-pending-indicator">
+                <span className="suggestion-pending-dot" />
+                <span>Tracking changes…</span>
+              </div>
+            )}
+            <EditorContent editor={editor} />
           </div>
-        )}
-        <EditorContent editor={editor} />
-        <Threads editor={editor} onSnapshotSave={isOwner ? saveCleanSnapshot : undefined} />
+        </div>
+        <div className="threads-panel-right print:hidden">
+          <Threads editor={editor} onSnapshotSave={isOwner ? saveCleanSnapshot : undefined} />
+        </div>
       </div>
     </div>
   );

@@ -74,10 +74,8 @@
 
 /* Suggestion threads panel - positioned alongside editor */
 .suggestion-threads-panel {
-  position: absolute;
-  right: 12px;
+  position: relative;
   top: 0;
-  max-width: 300px;
   width: 100%;
 }
 
@@ -89,6 +87,7 @@
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   z-index: 1;
   transition: z-index 0s, box-shadow 0.15s ease;
+  margin-bottom: 12px;
 }
 
 .suggestion-thread-wrapper:hover,
@@ -466,14 +465,20 @@ body {
   display: none;
 }
 
+/* Threads panel on the right side of the document */
+.threads-panel-right {
+  width: 350px;
+  min-width: 350px;
+  flex-shrink: 0;
+  margin-left: 16px;
+  position: relative;
+}
+
 /* For desktop */
 
 .anchored-threads {
   display: block;
-  max-width: 300px;
   width: 100%;
-  position: absolute;
-  right: 12px;
 }
 
 @media (max-width: 640px) {
