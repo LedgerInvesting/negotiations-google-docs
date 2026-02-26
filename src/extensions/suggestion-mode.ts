@@ -233,6 +233,19 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
 
   tr.steps.forEach((step, stepIndex) => {
     // ---------------------------------------------------------------
+    // Skip Liveblocks comment mark steps (adding a comment should not
+    // create a suggestion).
+    // ---------------------------------------------------------------
+    if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+      const markName = step.mark?.type?.name;
+      if (markName === "liveblocksCommentMark") {
+        const result = step.apply(docBeforeStep);
+        if (result.doc) docBeforeStep = result.doc;
+        return;
+      }
+    }
+
+    // ---------------------------------------------------------------
     // Formatting steps (AddMarkStep / RemoveMarkStep)
     // ---------------------------------------------------------------
     if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
@@ -669,6 +682,21 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
               };
             }
             
+            // Skip transactions that only contain Liveblocks comment mark steps
+            // (i.e. when a non-owner adds a comment thread on selected text).
+            const isCommentMarkOnly = tr.docChanged && tr.steps.length > 0 && tr.steps.every((step: unknown) => {
+              if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+                return step.mark?.type?.name === "liveblocksCommentMark";
+              }
+              return false;
+            });
+            if (isCommentMarkOnly) {
+              return {
+                ...pluginState,
+                previousDoc: newState.doc,
+              };
+            }
+
             // If document changed by user, debounce and compare
             if (tr.docChanged && !pluginState.isProcessing) {
               const isStartingNewEdit = pluginState.debounceTimeout === null;

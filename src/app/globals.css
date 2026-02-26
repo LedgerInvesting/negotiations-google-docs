@@ -494,3 +494,78 @@ body {
 div[data-radix-popper-content-wrapper] {
   z-index: 50!important
 }
+
+/* ── Make Liveblocks threads & suggestions more compact ── */
+
+/* Scale down the root sizing tokens for Liveblocks UI in threads/panels
+   (but NOT the inline marks in the editor, which also have .lb-root) */
+.lb-root:not(.lb-tiptap-thread-mark):not(.lb-tiptap-thread-mark-selected):not(.lb-selection):not(.lb-tiptap-active-selection) {
+  font-size: 0.8125rem;          /* 13px base instead of ~16px */
+  --lb-spacing: 0.75em;          /* tighter padding/gaps */
+  --lb-icon-size: 16px;          /* smaller icons */
+}
+
+/* Ensure inline editor marks from Liveblocks inherit the document font size */
+.tiptap .lb-root.lb-tiptap-thread-mark,
+.tiptap .lb-root.lb-selection,
+.tiptap .lb-root.lb-tiptap-active-selection {
+  font-size: inherit;
+}
+
+/* Smaller comment body & composer text */
+.lb-comment-body,
+.lb-composer-editor {
+  font-size: 0.8125rem;
+}
+
+/* Smaller author name & date */
+.lb-comment-author {
+  font-size: 0.8125rem;
+}
+
+.lb-comment-date {
+  font-size: 0.75rem;
+}
+
+/* Compact the thread composer footer */
+.lb-composer-footer {
+  padding-block-end: 0.5em;
+}
+
+/* Suggestion thread wrappers – tighter */
+.suggestion-thread-wrapper {
+  margin-bottom: 8px;
+}
+
+.suggestion-thread-label {
+  padding: 5px 10px 3px;
+  font-size: 0.75rem;
+}
+
+.suggestion-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.suggestion-actions-bar {
+  padding: 6px 10px;
+  gap: 6px;
+}
+
+.suggestion-accept-btn,
+.suggestion-reject-btn {
+  font-size: 12px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+/* Floating composer & threads – smaller text */
+.floating-composer,
+.floating-threads {
+  font-size: 0.8125rem;
+}
+
+/* Anchored threads – smaller text */
+.anchored-threads .lb-root {
+  font-size: 0.8125rem;
+}
