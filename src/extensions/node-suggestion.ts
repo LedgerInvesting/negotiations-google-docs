@@ -7,6 +7,7 @@ const NODE_SUGGESTION_TYPES = [
   "bulletList",
   "orderedList",
   "taskList",
+  "table",
 ];
 
 declare module "@tiptap/core" {
@@ -82,6 +83,17 @@ export const NodeSuggestion = Extension.create({
               return { "data-suggestion-old-data": attrs.nodeSuggestionOldData };
             },
           },
+          // "insert" = pending table/node insertion; "delete" = pending table/node deletion; null = format change
+          nodeSuggestionAction: {
+            default: null,
+            parseHTML: (el) => el.hasAttribute("data-node-suggestion")
+              ? (el.getAttribute("data-suggestion-action") ?? null)
+              : null,
+            renderHTML: (attrs) => {
+              if (!attrs.nodeSuggestionAction) return {};
+              return { "data-suggestion-action": attrs.nodeSuggestionAction };
+            },
+          },
         },
       },
     ];
@@ -105,11 +117,18 @@ export const NodeSuggestion = Extension.create({
             }
           });
 
+          // Process in reverse so deletions don't shift earlier positions
           nodesToUpdate.reverse().forEach(({ pos, node }) => {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
-                    nodeSuggestionTimestamp, nodeSuggestionOldData, ...cleanAttrs } = node.attrs as Record<string, unknown>;
-            tr.setNodeMarkup(pos, undefined, cleanAttrs);
+            if (node.attrs.nodeSuggestionAction === "delete") {
+              // Accepting a deletion → remove the node from the document
+              tr.delete(pos, pos + node.nodeSize);
+            } else {
+              // Accepting an insert or format change → keep node, strip suggestion attrs
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
+                      nodeSuggestionTimestamp, nodeSuggestionOldData, nodeSuggestionAction, ...cleanAttrs } = node.attrs as Record<string, unknown>;
+              tr.setNodeMarkup(pos, undefined, cleanAttrs);
+            }
             modified = true;
           });
 
@@ -136,7 +155,26 @@ export const NodeSuggestion = Extension.create({
             }
           });
 
+          // Process in reverse so deletions don't shift earlier positions
           nodesToUpdate.reverse().forEach(({ pos, node }) => {
+            if (node.attrs.nodeSuggestionAction === "insert") {
+              // Rejecting an insertion → delete the node from the document
+              tr.delete(pos, pos + node.nodeSize);
+              modified = true;
+              return;
+            }
+
+            if (node.attrs.nodeSuggestionAction === "delete") {
+              // Rejecting a deletion → keep the node, just strip suggestion attrs
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
+                      nodeSuggestionTimestamp, nodeSuggestionOldData, nodeSuggestionAction, ...cleanAttrs } = node.attrs as Record<string, unknown>;
+              tr.setNodeMarkup(pos, undefined, cleanAttrs);
+              modified = true;
+              return;
+            }
+
+            // Format change: restore old type and attrs from nodeSuggestionOldData
             let oldData: { type: string; attrs: Record<string, unknown> } | null = null;
             try {
               oldData = JSON.parse(node.attrs.nodeSuggestionOldData ?? "null");
@@ -147,20 +185,19 @@ export const NodeSuggestion = Extension.create({
             if (oldData) {
               const oldType = state.schema.nodes[oldData.type];
               if (oldType) {
-                // Restore old type and attrs, stripping suggestion attrs
                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
-                        nodeSuggestionTimestamp, nodeSuggestionOldData: _old, ...oldCleanAttrs } = oldData.attrs;
+                        nodeSuggestionTimestamp, nodeSuggestionOldData: _old, nodeSuggestionAction, ...oldCleanAttrs } = oldData.attrs;
                 tr.setNodeMarkup(pos, oldType, oldCleanAttrs);
                 modified = true;
                 return;
               }
             }
 
-            // Fallback: just clear suggestion attrs, keep current type
+            // Fallback: clear suggestion attrs, keep current type
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
-                    nodeSuggestionTimestamp, nodeSuggestionOldData, ...cleanAttrs } = node.attrs as Record<string, unknown>;
+                    nodeSuggestionTimestamp, nodeSuggestionOldData, nodeSuggestionAction, ...cleanAttrs } = node.attrs as Record<string, unknown>;
             tr.setNodeMarkup(pos, undefined, cleanAttrs);
             modified = true;
           });

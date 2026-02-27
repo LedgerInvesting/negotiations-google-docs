@@ -67,10 +67,11 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   // Debug: log filtering results
   useEffect(() => {
     console.log('[Threads] Total:', threads.length, 'Suggestion:', suggestionThreads.length, 'Regular:', regularThreads.length);
+    console.log('[Threads] currentUser.id:', currentUser?.id, 'isOwner:', isOwner);
     suggestionThreads.forEach(t => {
-      console.log('[Threads] Suggestion thread:', t.id, 'metadata:', JSON.stringify(t.metadata));
+      console.log('[Threads] Suggestion thread:', t.id, 'metadata.userId:', t.metadata?.userId, 'match:', t.metadata?.userId === currentUser?.id);
     });
-  }, [threads, suggestionThreads, regularThreads]);
+  }, [threads, suggestionThreads, regularThreads, currentUser, isOwner]);
 
   // Calculate positions for suggestion threads
   const updatePositions = useCallback(() => {
@@ -135,7 +136,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   ) => {
     if (!editor) return;
     console.log("[Threads] Accepting suggestion:", suggestionId, "type:", changeType);
-    if (changeType === "nodeFormat") {
+    if (changeType === "nodeFormat" || changeType === "tableInsert" || changeType === "tableDelete") {
       editor.chain().acceptNodeSuggestion(suggestionId).run();
     } else {
       acceptSuggestion(editor, suggestionId);
@@ -157,7 +158,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   ) => {
     if (!editor) return;
     console.log("[Threads] Rejecting suggestion:", suggestionId, "type:", changeType);
-    if (changeType === "nodeFormat") {
+    if (changeType === "nodeFormat" || changeType === "tableInsert" || changeType === "tableDelete") {
       editor.chain().rejectNodeSuggestion(suggestionId).run();
     } else {
       rejectSuggestion(editor, suggestionId);
@@ -227,7 +228,11 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                             ? "suggestion-badge-format"
                             : changeType === "nodeFormat"
                               ? "suggestion-badge-nodeformat"
-                              : "suggestion-badge-delete"
+                              : changeType === "tableInsert"
+                                ? "suggestion-badge-tableinsert"
+                                : changeType === "tableDelete"
+                                  ? "suggestion-badge-tabledelete"
+                                  : "suggestion-badge-delete"
                     }`}
                   >
                     {changeType === "insert"
@@ -238,7 +243,11 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                           ? "Format"
                           : changeType === "nodeFormat"
                             ? "Block format"
-                            : "− Deletion"}
+                            : changeType === "tableInsert"
+                              ? "⊞ Table"
+                              : changeType === "tableDelete"
+                                ? "⊟ Table"
+                                : "− Deletion"}
                   </span>
                 </div>
 
@@ -246,6 +255,8 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                 <Thread
                   thread={thread}
                   className="suggestion-thread"
+                  showResolveAction={false}
+                  showActions={false}
                 />
 
                 {/* Accept/Reject buttons for owners */}
@@ -268,6 +279,21 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                     >
                       <XIcon className="w-4 h-4 mr-1.5" />
                       Reject
+                    </button>
+                  </div>
+                )}
+
+                {/* Cancel button for the suggesting user */}
+                {!isOwner && thread.metadata?.userId === currentUser?.id && (
+                  <div className="suggestion-actions-bar">
+                    <button
+                      className="suggestion-cancel-btn"
+                      onClick={() =>
+                        handleReject(thread.id, suggestionId, changeType)
+                      }
+                    >
+                      <XIcon className="w-4 h-4 mr-1.5" />
+                      Cancel suggestion
                     </button>
                   </div>
                 )}

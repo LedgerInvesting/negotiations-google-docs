@@ -129,7 +129,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
   // Callback to create comment threads for suggestions with debouncing
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace" | "format" | "nodeFormat";
+    type: "insert" | "delete" | "replace" | "format" | "nodeFormat" | "tableInsert" | "tableDelete";
     text: string;
     oldText?: string;
     newText?: string;
@@ -160,6 +160,10 @@ export const Editor = ({ initialContent }: EditorProps) => {
             label = `Format "${truncText}": ${data.description ?? "style change"}`;
           } else if (data.type === "nodeFormat") {
             label = `Block format: ${data.description ?? data.text}`;
+          } else if (data.type === "tableInsert") {
+            label = "Suggested table insertion";
+          } else if (data.type === "tableDelete") {
+            label = "Suggested table deletion";
           } else {
             label = `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
           }
@@ -183,6 +187,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
               changeType: data.type,
               status: "pending",
               nodeRevertData: data.type === "nodeFormat" ? (data.oldNodeData ?? undefined) : undefined,
+              userId: currentUser?.id,
             },
           });
 
@@ -190,7 +195,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
 
           // Update the suggestion's thread ID
           if (editorRef.current) {
-            if (data.type === "nodeFormat") {
+            if (data.type === "nodeFormat" || data.type === "tableInsert" || data.type === "tableDelete") {
               editorRef.current.chain().updateNodeSuggestionThreadId(data.suggestionId, thread.id).run();
               console.log('[Editor] Node suggestion thread ID updated:', thread.id);
             } else {

@@ -9,7 +9,7 @@ export interface SuggestionModeOptions {
   userId: string;
   onCreateSuggestion?: (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace" | "format" | "nodeFormat";
+    type: "insert" | "delete" | "replace" | "format" | "nodeFormat" | "tableInsert" | "tableDelete";
     text: string;
     oldText?: string;
     newText?: string;
@@ -73,7 +73,18 @@ interface NodeFormatChange {
   oldNodeAttrs: Record<string, unknown>;
 }
 
-type DocChange = InsertChange | DeleteChange | ReplaceChange | FormatChange | NodeFormatChange;
+interface TableInsertChange {
+  type: "tableInsert";
+  pos: number; // position of the inserted table in the final doc
+}
+
+interface TableDeleteChange {
+  type: "tableDelete";
+  pos: number; // position in the final doc where the table should be re-inserted
+  tableJSON: Record<string, unknown>; // serialized table node for restoration
+}
+
+type DocChange = InsertChange | DeleteChange | ReplaceChange | FormatChange | NodeFormatChange | TableInsertChange | TableDeleteChange;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -145,7 +156,7 @@ const BLOCK_SUGGESTION_TYPES = new Set([
 function stripSuggestionAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
-          nodeSuggestionTimestamp, nodeSuggestionOldData, ...rest } = attrs;
+          nodeSuggestionTimestamp, nodeSuggestionOldData, nodeSuggestionAction, ...rest } = attrs;
   return rest;
 }
 
@@ -220,6 +231,73 @@ function detectNodeFormatChanges(
 }
 
 // ---------------------------------------------------------------------------
+// Table insert / delete detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect table insertions and deletions between docBefore and docAfter.
+ * stepMapping maps positions from docBefore → docAfter (the step's own map).
+ * finalMapping maps positions from docAfter → the final transaction doc.
+ */
+function detectTableChanges(
+  docBefore: ProseMirrorNode,
+  docAfter: ProseMirrorNode,
+  stepMapping: { map(pos: number, bias?: number): number },
+  finalMapping: Mapping
+): Array<TableInsertChange | TableDeleteChange> {
+  const changes: Array<TableInsertChange | TableDeleteChange> = [];
+
+  // Collect tables in docBefore (un-tracked only)
+  const tablesBefore = new Map<number, ProseMirrorNode>();
+  docBefore.descendants((node, pos) => {
+    if (node.type.name === "table") {
+      if (!node.attrs.nodeSuggestionId) tablesBefore.set(pos, node);
+      return false;
+    }
+    return true;
+  });
+
+  // Collect tables in docAfter (un-tracked only)
+  const tablesAfter = new Map<number, ProseMirrorNode>();
+  docAfter.descendants((node, pos) => {
+    if (node.type.name === "table") {
+      if (!node.attrs.nodeSuggestionId) tablesAfter.set(pos, node);
+      return false;
+    }
+    return true;
+  });
+
+  // Deleted: in docBefore but not at the mapped position in docAfter
+  tablesBefore.forEach((node, posBefore) => {
+    const posAfter = stepMapping.map(posBefore, 1);
+    const nodeAfter = docAfter.nodeAt(posAfter);
+    if (!nodeAfter || nodeAfter.type.name !== "table") {
+      changes.push({
+        type: "tableDelete",
+        pos: finalMapping.map(posAfter, 1),
+        tableJSON: node.toJSON() as Record<string, unknown>,
+      });
+    }
+  });
+
+  // Inserted: in docAfter but no before-table maps to that position
+  tablesAfter.forEach((_node, posAfter) => {
+    let wasExisting = false;
+    tablesBefore.forEach((_, posBefore) => {
+      if (stepMapping.map(posBefore, 1) === posAfter) wasExisting = true;
+    });
+    if (!wasExisting) {
+      changes.push({
+        type: "tableInsert",
+        pos: finalMapping.map(posAfter, 1),
+      });
+    }
+  });
+
+  return changes;
+}
+
+// ---------------------------------------------------------------------------
 // Position mapping
 // ---------------------------------------------------------------------------
 
@@ -254,6 +332,14 @@ function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
       ...change,
       pos: mapping.map(change.pos, 1),
     };
+  }
+
+  if (change.type === "tableInsert") {
+    return { ...change, pos: mapping.map(change.pos, 1) };
+  }
+
+  if (change.type === "tableDelete") {
+    return { ...change, pos: mapping.map(change.pos, 1) };
   }
 
   // delete suggestions are represented as "insert deleted text at `from` with delete mark"
@@ -502,16 +588,24 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
     // If no text-based changes were detected but the document changed,
     // this is a block-level attribute or structure change (alignment, heading, lists, etc.)
     if (!anyTextChange && !docBeforeStep.eq(docAfterStep)) {
+      const finalMapping = tr.mapping.slice(stepIndex + 1);
+
       const nodeChanges = detectNodeFormatChanges(
         docBeforeStep,
         docAfterStep,
         step.from,
         step.to,
-        tr.mapping.slice(stepIndex + 1)
+        finalMapping
       );
       if (nodeChanges.length > 0) {
         console.log('[SuggestionMode] Detected', nodeChanges.length, 'node format change(s):', nodeChanges.map(c => c.description));
         changes.push(...nodeChanges);
+      }
+
+      const tableChanges = detectTableChanges(docBeforeStep, docAfterStep, stepMap, finalMapping);
+      if (tableChanges.length > 0) {
+        console.log('[SuggestionMode] Detected', tableChanges.length, 'table change(s):', tableChanges.map(c => c.type));
+        changes.push(...tableChanges);
       }
     }
 
@@ -554,6 +648,8 @@ function createSuggestionsForChanges(
   const insertChanges = changes.filter((c) => c.type === "insert") as InsertChange[];
   const deleteChanges = changes.filter((c) => c.type === "delete") as DeleteChange[];
   const nodeFormatChanges = changes.filter((c) => c.type === "nodeFormat") as NodeFormatChange[];
+  const tableInsertChanges = changes.filter((c) => c.type === "tableInsert") as TableInsertChange[];
+  const tableDeleteChanges = changes.filter((c) => c.type === "tableDelete") as TableDeleteChange[];
 
   // ------- Replace changes -------
   replaceChanges.forEach((change) => {
@@ -801,6 +897,92 @@ function createSuggestionsForChanges(
         .catch((error: unknown) => {
           console.error("[SuggestionMode] Failed to create node format thread:", error);
         });
+    }
+  });
+
+  // ------- Table insert changes (mark the newly inserted table as pending) -------
+  tableInsertChanges.forEach((change) => {
+    const node = view.state.doc.nodeAt(change.pos);
+    if (!node || node.type.name !== "table") {
+      console.warn('[SuggestionMode] Table not found at pos for insert:', change.pos);
+      return;
+    }
+    if (node.attrs.nodeSuggestionId) {
+      console.log('[SuggestionMode] Table already has suggestion, skipping insert:', change.pos);
+      return;
+    }
+
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+
+    console.log('[SuggestionMode] Marking table insertion as suggestion:', { suggestionId, pos: change.pos });
+
+    tr.setNodeMarkup(change.pos, undefined, {
+      ...node.attrs,
+      nodeSuggestionId: suggestionId,
+      nodeSuggestionUserId: userId,
+      nodeSuggestionCommentThreadId: `temp-${suggestionId}`,
+      nodeSuggestionTimestamp: timestamp,
+      nodeSuggestionAction: "insert",
+    });
+
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
+        suggestionId,
+        type: "tableInsert",
+        text: "Table insertion",
+        from: change.pos,
+        to: change.pos,
+      })
+        .then((threadId) => {
+          console.log('[SuggestionMode] Thread created for table insert:', threadId);
+        })
+        .catch((error: unknown) => {
+          console.error("[SuggestionMode] Failed to create table insert thread:", error);
+        });
+    }
+  });
+
+  // ------- Table delete changes (re-insert the deleted table marked as pending) -------
+  // Process last — these insert nodes, shifting positions
+  tableDeleteChanges.forEach((change) => {
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+
+    console.log('[SuggestionMode] Re-inserting deleted table as suggestion:', { suggestionId, pos: change.pos });
+
+    try {
+      const tableNodeJSON = {
+        ...change.tableJSON,
+        attrs: {
+          ...(change.tableJSON.attrs as Record<string, unknown> ?? {}),
+          nodeSuggestionId: suggestionId,
+          nodeSuggestionUserId: userId,
+          nodeSuggestionCommentThreadId: `temp-${suggestionId}`,
+          nodeSuggestionTimestamp: timestamp,
+          nodeSuggestionAction: "delete",
+        },
+      };
+      const tableNode = view.state.schema.nodeFromJSON(tableNodeJSON);
+      tr.insert(change.pos, tableNode);
+
+      if (onCreateSuggestion) {
+        onCreateSuggestion({
+          suggestionId,
+          type: "tableDelete",
+          text: "Table deletion",
+          from: change.pos,
+          to: change.pos,
+        })
+          .then((threadId) => {
+            console.log('[SuggestionMode] Thread created for table delete:', threadId);
+          })
+          .catch((error: unknown) => {
+            console.error("[SuggestionMode] Failed to create table delete thread:", error);
+          });
+      }
+    } catch (err) {
+      console.error("[SuggestionMode] Failed to reconstruct deleted table:", err);
     }
   });
 

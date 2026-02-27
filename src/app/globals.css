@@ -135,6 +135,16 @@
   background-color: #e0f2fe;
 }
 
+.suggestion-badge-tableinsert {
+  color: #065f46;
+  background-color: #d1fae5;
+}
+
+.suggestion-badge-tabledelete {
+  color: #991b1b;
+  background-color: #fee2e2;
+}
+
 /* Block-level suggestion: green left border + faint tint */
 p[data-node-suggestion],
 h1[data-node-suggestion],
@@ -146,6 +156,20 @@ ul[data-node-suggestion],
 ol[data-node-suggestion] {
   border-left: 3px solid #10b981;
   background-color: rgba(16, 185, 129, 0.05);
+}
+
+/* Table suggestions: outline the whole table */
+table[data-node-suggestion][data-suggestion-action="insert"] {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+  background-color: rgba(16, 185, 129, 0.04);
+}
+
+table[data-node-suggestion][data-suggestion-action="delete"] {
+  outline: 2px solid #ef4444;
+  outline-offset: 2px;
+  background-color: rgba(239, 68, 68, 0.04);
+  opacity: 0.8;
 }
 
 .suggestion-thread {
@@ -201,6 +225,27 @@ ol[data-node-suggestion] {
 
 .suggestion-reject-btn:hover {
   background-color: #fef2f2;
+}
+
+.suggestion-cancel-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: white;
+  color: #6b7280;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.suggestion-cancel-btn:hover {
+  background-color: #f3f4f6;
 }
 
 @media (max-width: 640px) {
@@ -571,7 +616,8 @@ div[data-radix-popper-content-wrapper] {
 }
 
 .suggestion-accept-btn,
-.suggestion-reject-btn {
+.suggestion-reject-btn,
+.suggestion-cancel-btn {
   font-size: 12px;
   height: 28px;
   padding: 0 10px;

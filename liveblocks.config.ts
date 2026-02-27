@@ -17,6 +17,7 @@ declare global {
       changeType?: string; // "insert" | "delete" | "replace" | "format" | "nodeFormat"
       status?: string; // "pending" | "accepted" | "rejected"
       nodeRevertData?: string; // JSON { type, attrs } — fallback for block suggestion rejection
+      userId?: string; // Liveblocks user ID of the user who created the suggestion
     };
     // Room storage types
     Storage: {

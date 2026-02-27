@@ -46,11 +46,16 @@ function cleanNode(node: DocNode): DocNode | null {
     };
   }
 
-  // Block nodes with pending node suggestions: strip suggestion attrs (keep current format)
+  // Block nodes with pending node suggestions
   if (node.attrs?.nodeSuggestionId != null) {
+    // A pending insertion is not canonical — remove it from the clean snapshot
+    if (node.attrs.nodeSuggestionAction === "insert") {
+      return null;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
-            nodeSuggestionTimestamp, nodeSuggestionOldData, ...cleanAttrs } = node.attrs as Record<string, any>;
+            nodeSuggestionTimestamp, nodeSuggestionOldData, nodeSuggestionAction, ...cleanAttrs } = node.attrs as Record<string, any>;
     const cleanedContent = node.content
       ?.map(cleanNode)
       .filter((c): c is DocNode => c !== null);
