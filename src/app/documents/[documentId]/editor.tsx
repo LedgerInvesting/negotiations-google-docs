@@ -37,6 +37,7 @@ import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
 import { SuggestionMode } from "@/extensions/suggestion-mode";
+import { NodeSuggestion } from "@/extensions/node-suggestion";
 import { Ruler } from "./ruler";
 import { Threads } from "./threads";
 import { LEFT_MARGIN_DEFAULT, RIGHT_MARGIN_DEFAULT } from "@/constants/margins";
@@ -128,11 +129,12 @@ export const Editor = ({ initialContent }: EditorProps) => {
   // Callback to create comment threads for suggestions with debouncing
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace" | "format";
+    type: "insert" | "delete" | "replace" | "format" | "nodeFormat";
     text: string;
     oldText?: string;
     newText?: string;
     description?: string;
+    oldNodeData?: string;
     from: number;
     to: number;
   }) => {
@@ -156,6 +158,8 @@ export const Editor = ({ initialContent }: EditorProps) => {
           } else if (data.type === "format") {
             const truncText = data.text.substring(0, 40) + (data.text.length > 40 ? "…" : "");
             label = `Format "${truncText}": ${data.description ?? "style change"}`;
+          } else if (data.type === "nodeFormat") {
+            label = `Block format: ${data.description ?? data.text}`;
           } else {
             label = `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
           }
@@ -178,15 +182,21 @@ export const Editor = ({ initialContent }: EditorProps) => {
               suggestionId: data.suggestionId,
               changeType: data.type,
               status: "pending",
+              nodeRevertData: data.type === "nodeFormat" ? (data.oldNodeData ?? undefined) : undefined,
             },
           });
-          
+
           console.log('[Editor] Thread created successfully:', thread.id);
-          
+
           // Update the suggestion's thread ID
           if (editorRef.current) {
-            const updated = updateSuggestionThreadId(editorRef.current, data.suggestionId, thread.id);
-            console.log('[Editor] Thread ID updated:', updated);
+            if (data.type === "nodeFormat") {
+              editorRef.current.chain().updateNodeSuggestionThreadId(data.suggestionId, thread.id).run();
+              console.log('[Editor] Node suggestion thread ID updated:', thread.id);
+            } else {
+              const updated = updateSuggestionThreadId(editorRef.current, data.suggestionId, thread.id);
+              console.log('[Editor] Thread ID updated:', updated);
+            }
           }
           
           pendingThreadsRef.current.delete(data.suggestionId);
@@ -247,6 +257,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
       }),
       SuggestionInsert,
       SuggestionDelete,
+      NodeSuggestion,
       SuggestionMode.configure({
         isOwner,
         userId: currentUser?.id || "",

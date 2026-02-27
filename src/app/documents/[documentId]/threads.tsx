@@ -130,11 +130,16 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
 
   const handleAccept = (
     threadId: string,
-    suggestionId: string
+    suggestionId: string,
+    changeType: string
   ) => {
     if (!editor) return;
-    console.log("[Threads] Accepting suggestion:", suggestionId);
-    acceptSuggestion(editor, suggestionId);
+    console.log("[Threads] Accepting suggestion:", suggestionId, "type:", changeType);
+    if (changeType === "nodeFormat") {
+      editor.chain().acceptNodeSuggestion(suggestionId).run();
+    } else {
+      acceptSuggestion(editor, suggestionId);
+    }
     editThreadMetadata({
       threadId,
       metadata: {
@@ -147,11 +152,16 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
 
   const handleReject = (
     threadId: string,
-    suggestionId: string
+    suggestionId: string,
+    changeType: string
   ) => {
     if (!editor) return;
-    console.log("[Threads] Rejecting suggestion:", suggestionId);
-    rejectSuggestion(editor, suggestionId);
+    console.log("[Threads] Rejecting suggestion:", suggestionId, "type:", changeType);
+    if (changeType === "nodeFormat") {
+      editor.chain().rejectNodeSuggestion(suggestionId).run();
+    } else {
+      rejectSuggestion(editor, suggestionId);
+    }
     editThreadMetadata({
       threadId,
       metadata: {
@@ -215,7 +225,9 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                           ? "suggestion-badge-replace"
                           : changeType === "format"
                             ? "suggestion-badge-format"
-                            : "suggestion-badge-delete"
+                            : changeType === "nodeFormat"
+                              ? "suggestion-badge-nodeformat"
+                              : "suggestion-badge-delete"
                     }`}
                   >
                     {changeType === "insert"
@@ -223,8 +235,10 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                       : changeType === "replace"
                         ? "⇄ Replace"
                         : changeType === "format"
-                          ? "🎨 Format"
-                          : "− Deletion"}
+                          ? "Format"
+                          : changeType === "nodeFormat"
+                            ? "Block format"
+                            : "− Deletion"}
                   </span>
                 </div>
 
@@ -240,7 +254,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                     <button
                       className="suggestion-accept-btn"
                       onClick={() =>
-                        handleAccept(thread.id, suggestionId)
+                        handleAccept(thread.id, suggestionId, changeType)
                       }
                     >
                       <CheckIcon className="w-4 h-4 mr-1.5" />
@@ -249,7 +263,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
                     <button
                       className="suggestion-reject-btn"
                       onClick={() =>
-                        handleReject(thread.id, suggestionId)
+                        handleReject(thread.id, suggestionId, changeType)
                       }
                     >
                       <XIcon className="w-4 h-4 mr-1.5" />

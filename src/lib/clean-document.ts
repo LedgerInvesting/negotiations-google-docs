@@ -46,6 +46,21 @@ function cleanNode(node: DocNode): DocNode | null {
     };
   }
 
+  // Block nodes with pending node suggestions: strip suggestion attrs (keep current format)
+  if (node.attrs?.nodeSuggestionId != null) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
+            nodeSuggestionTimestamp, nodeSuggestionOldData, ...cleanAttrs } = node.attrs as Record<string, any>;
+    const cleanedContent = node.content
+      ?.map(cleanNode)
+      .filter((c): c is DocNode => c !== null);
+    return {
+      ...node,
+      attrs: cleanAttrs,
+      content: cleanedContent?.length ? cleanedContent : undefined,
+    };
+  }
+
   // Non-text nodes with content: recurse into children
   if (node.content) {
     const cleanedContent = node.content

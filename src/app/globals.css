@@ -130,6 +130,24 @@
   background-color: #fef3c7;
 }
 
+.suggestion-badge-nodeformat {
+  color: #0369a1;
+  background-color: #e0f2fe;
+}
+
+/* Block-level suggestion: green left border + faint tint */
+p[data-node-suggestion],
+h1[data-node-suggestion],
+h2[data-node-suggestion],
+h3[data-node-suggestion],
+h4[data-node-suggestion],
+h5[data-node-suggestion],
+ul[data-node-suggestion],
+ol[data-node-suggestion] {
+  border-left: 3px solid #10b981;
+  background-color: rgba(16, 185, 129, 0.05);
+}
+
 .suggestion-thread {
   border: none !important;
   box-shadow: none !important;

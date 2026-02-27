@@ -9,11 +9,12 @@ export interface SuggestionModeOptions {
   userId: string;
   onCreateSuggestion?: (data: {
     suggestionId: string;
-    type: "insert" | "delete" | "replace" | "format";
+    type: "insert" | "delete" | "replace" | "format" | "nodeFormat";
     text: string;
     oldText?: string;
     newText?: string;
     description?: string;
+    oldNodeData?: string;
     from: number;
     to: number;
   }) => Promise<string>; // Returns commentThreadId
@@ -64,7 +65,15 @@ interface FormatChange {
   oldNodes: OldTextNode[];
 }
 
-type DocChange = InsertChange | DeleteChange | ReplaceChange | FormatChange;
+interface NodeFormatChange {
+  type: "nodeFormat";
+  pos: number;           // position of the block node (in final doc)
+  description: string;
+  oldNodeType: string;
+  oldNodeAttrs: Record<string, unknown>;
+}
+
+type DocChange = InsertChange | DeleteChange | ReplaceChange | FormatChange | NodeFormatChange;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,6 +130,96 @@ function captureOldTextNodes(doc: ProseMirrorNode, from: number, to: number): Ol
 }
 
 // ---------------------------------------------------------------------------
+// Node format change detection helpers
+// ---------------------------------------------------------------------------
+
+const BLOCK_SUGGESTION_TYPES = new Set([
+  "paragraph",
+  "heading",
+  "bulletList",
+  "orderedList",
+  "taskList",
+]);
+
+/** Strip nodeSuggestion* attrs so comparison is based only on domain attrs. */
+function stripSuggestionAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
+          nodeSuggestionTimestamp, nodeSuggestionOldData, ...rest } = attrs;
+  return rest;
+}
+
+/** Human-readable label for a block-level node change. */
+function describeNodeFormatChange(
+  oldType: string,
+  oldAttrs: Record<string, unknown>,
+  newType: string,
+  newAttrs: Record<string, unknown>
+): string {
+  if (newType === "heading") return `Heading ${newAttrs.level ?? ""}`;
+  if (oldType === "heading" && newType === "paragraph") return "Normal text";
+  if (newType === "bulletList") return "Bullet list";
+  if (newType === "orderedList") return "Ordered list";
+  if (newType === "taskList") return "Task list";
+  if (oldType === "bulletList" || oldType === "orderedList" || oldType === "taskList") return "Normal text";
+  // Same node type — attribute change
+  if (oldType === newType) {
+    const parts: string[] = [];
+    if (newAttrs.textAlign && newAttrs.textAlign !== oldAttrs.textAlign) {
+      const align = String(newAttrs.textAlign);
+      parts.push(`Align: ${align.charAt(0).toUpperCase() + align.slice(1)}`);
+    }
+    if (newAttrs.lineHeight && newAttrs.lineHeight !== oldAttrs.lineHeight) {
+      parts.push(`Line height: ${newAttrs.lineHeight}`);
+    }
+    if (parts.length > 0) return parts.join(", ");
+  }
+  return "Block format";
+}
+
+/** Compare block nodes in [from, to] between docBefore and docAfter and return changes. */
+function detectNodeFormatChanges(
+  docBefore: ProseMirrorNode,
+  docAfter: ProseMirrorNode,
+  from: number,
+  to: number,
+  mapping: Mapping
+): NodeFormatChange[] {
+  const changes: NodeFormatChange[] = [];
+
+  docBefore.nodesBetween(from, to, (nodeBefore, pos) => {
+    if (!BLOCK_SUGGESTION_TYPES.has(nodeBefore.type.name)) return true; // recurse into non-block types
+
+    const nodeAfter = docAfter.nodeAt(pos);
+    if (!nodeAfter) return false;
+
+    const cleanBefore = stripSuggestionAttrs(nodeBefore.attrs as Record<string, unknown>);
+    const cleanAfter = stripSuggestionAttrs(nodeAfter.attrs as Record<string, unknown>);
+
+    const typeChanged = nodeBefore.type.name !== nodeAfter.type.name;
+    const attrsChanged = JSON.stringify(cleanBefore) !== JSON.stringify(cleanAfter);
+
+    if (typeChanged || attrsChanged) {
+      const finalPos = mapping.map(pos, 1);
+      changes.push({
+        type: "nodeFormat",
+        pos: finalPos,
+        description: describeNodeFormatChange(
+          nodeBefore.type.name, cleanBefore,
+          nodeAfter.type.name, cleanAfter
+        ),
+        oldNodeType: nodeBefore.type.name,
+        oldNodeAttrs: cleanBefore,
+      });
+    }
+
+    return false; // don't recurse into block node children
+  });
+
+  return changes;
+}
+
+// ---------------------------------------------------------------------------
 // Position mapping
 // ---------------------------------------------------------------------------
 
@@ -147,6 +246,13 @@ function mapDocChange(change: DocChange, mapping: Mapping): DocChange {
       ...change,
       from: mapping.map(change.from, 1),
       to: mapping.map(change.to, -1),
+    };
+  }
+
+  if (change.type === "nodeFormat") {
+    return {
+      ...change,
+      pos: mapping.map(change.pos, 1),
     };
   }
 
@@ -212,6 +318,16 @@ function mergeDocChanges(changes: DocChange[]): DocChange[] {
       prev.to === change.to
     ) {
       // Keep the earliest old content, combine descriptions
+      prev.description = `${prev.description}, ${change.description}`;
+      continue;
+    }
+
+    // Merge node format changes on the same block node (e.g. align + line height in one macro)
+    if (
+      prev.type === "nodeFormat" &&
+      change.type === "nodeFormat" &&
+      prev.pos === change.pos
+    ) {
       prev.description = `${prev.description}, ${change.description}`;
       continue;
     }
@@ -320,6 +436,10 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
     // Map positions produced by this step into the *final* document of this transaction.
     const mapFromAfterStepToEnd = tr.mapping.slice(stepIndex + 1);
 
+    // Track whether any text-based change was detected for this step.
+    // If not (but doc changed), we check for block-level node format changes.
+    let anyTextChange = false;
+
     stepMap.forEach((from, to, newFrom, newTo) => {
       const deletedText =
         to > from ? docBeforeStep.textBetween(from, to, "\n", "\n") : "";
@@ -329,6 +449,13 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
 
       // Replacement: user replaced an existing range with new content.
       if (deletedText.length > 0 && insertedText.length > 0) {
+        // If text is identical, this is a structural change (e.g. list wrap/unwrap),
+        // not a text replacement — defer to node format detection below.
+        if (deletedText === insertedText) {
+          return;
+        }
+
+        anyTextChange = true;
         const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
         const deletePos = mapFromBeforeStepToEnd.map(from, 1);
         const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
@@ -347,6 +474,7 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
 
       // Deletions
       if (deletedText.length > 0) {
+        anyTextChange = true;
         const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
         const deletePos = mapFromBeforeStepToEnd.map(from, 1);
         changes.push({
@@ -359,6 +487,7 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
 
       // Insertions
       if (insertedText.length > 0) {
+        anyTextChange = true;
         const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
         const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
         changes.push({
@@ -369,6 +498,22 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         });
       }
     });
+
+    // If no text-based changes were detected but the document changed,
+    // this is a block-level attribute or structure change (alignment, heading, lists, etc.)
+    if (!anyTextChange && !docBeforeStep.eq(docAfterStep)) {
+      const nodeChanges = detectNodeFormatChanges(
+        docBeforeStep,
+        docAfterStep,
+        step.from,
+        step.to,
+        tr.mapping.slice(stepIndex + 1)
+      );
+      if (nodeChanges.length > 0) {
+        console.log('[SuggestionMode] Detected', nodeChanges.length, 'node format change(s):', nodeChanges.map(c => c.description));
+        changes.push(...nodeChanges);
+      }
+    }
 
     docBeforeStep = docAfterStep;
   });
@@ -408,6 +553,7 @@ function createSuggestionsForChanges(
   const formatChanges = changes.filter((c) => c.type === "format") as FormatChange[];
   const insertChanges = changes.filter((c) => c.type === "insert") as InsertChange[];
   const deleteChanges = changes.filter((c) => c.type === "delete") as DeleteChange[];
+  const nodeFormatChanges = changes.filter((c) => c.type === "nodeFormat") as NodeFormatChange[];
 
   // ------- Replace changes -------
   replaceChanges.forEach((change) => {
@@ -605,6 +751,59 @@ function createSuggestionsForChanges(
     }
   });
   
+  // ------- Node format changes (alignment, heading, line height, lists) -------
+  nodeFormatChanges.forEach((change) => {
+    const node = view.state.doc.nodeAt(change.pos);
+    if (!node) {
+      console.warn('[SuggestionMode] Node not found at pos:', change.pos);
+      return;
+    }
+
+    // Skip if this node already has a pending suggestion (don't overwrite)
+    if (node.attrs.nodeSuggestionId) {
+      console.log('[SuggestionMode] Node already has suggestion, skipping:', change.pos);
+      return;
+    }
+
+    const suggestionId = generateSuggestionId();
+    const timestamp = Date.now();
+    const oldDataJSON = JSON.stringify({ type: change.oldNodeType, attrs: change.oldNodeAttrs });
+
+    console.log('[SuggestionMode] Adding node format suggestion:', {
+      suggestionId,
+      pos: change.pos,
+      description: change.description,
+      oldNodeType: change.oldNodeType,
+    });
+
+    tr.setNodeMarkup(change.pos, undefined, {
+      ...node.attrs,
+      nodeSuggestionId: suggestionId,
+      nodeSuggestionUserId: userId,
+      nodeSuggestionCommentThreadId: `temp-${suggestionId}`,
+      nodeSuggestionTimestamp: timestamp,
+      nodeSuggestionOldData: oldDataJSON,
+    });
+
+    if (onCreateSuggestion) {
+      onCreateSuggestion({
+        suggestionId,
+        type: "nodeFormat",
+        text: change.description,
+        description: change.description,
+        oldNodeData: oldDataJSON,
+        from: change.pos,
+        to: change.pos,
+      })
+        .then((threadId) => {
+          console.log('[SuggestionMode] Thread created for node format:', threadId);
+        })
+        .catch((error: unknown) => {
+          console.error("[SuggestionMode] Failed to create node format thread:", error);
+        });
+    }
+  });
+
   // Dispatch the transaction with suggestions
   console.log('[SuggestionMode] Dispatching transaction with suggestions');
   view.dispatch(tr);

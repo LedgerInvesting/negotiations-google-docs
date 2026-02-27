@@ -14,8 +14,9 @@ declare global {
     ThreadMetadata: {
       // Suggestion-specific metadata (all optional so regular threads work too)
       suggestionId?: string;
-      changeType?: string; // "insert" | "delete"
+      changeType?: string; // "insert" | "delete" | "replace" | "format" | "nodeFormat"
       status?: string; // "pending" | "accepted" | "rejected"
+      nodeRevertData?: string; // JSON { type, attrs } — fallback for block suggestion rejection
     };
     // Room storage types
     Storage: {
