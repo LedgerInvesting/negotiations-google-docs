@@ -13,24 +13,15 @@ import {
   FilePlusIcon,
   FileTextIcon,
   GlobeIcon,
-  ImageIcon,
   ItalicIcon,
-  Link2Icon,
-  ListIcon,
-  ListOrderedIcon,
-  ListTodoIcon,
-  MinusIcon,
   PrinterIcon,
   Redo2Icon,
   RemoveFormattingIcon,
-  SearchIcon,
   StrikethroughIcon,
-  TableIcon,
   TextIcon,
   // TrashIcon,
   UnderlineIcon,
   Undo2Icon,
-  UploadIcon,
 } from "lucide-react";
 
 import { RenameDialog } from "@/components/rename-dialog";
@@ -47,15 +38,6 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from "@/components/ui/menubar";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 import { Avatars } from "./avatars";
 
@@ -67,7 +49,6 @@ import { Document } from "@/hooks/use-documents";
 import { useCreateDocument } from "@/hooks/use-documents";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { useState } from "react";
 
 interface NavbarProps {
   data: Document;
@@ -77,40 +58,6 @@ export const Navbar = ({ data }: NavbarProps) => {
   const router = useRouter();
   const { editor } = useEditorStore();
   const { create } = useCreateDocument();
-
-  const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
-  const [imageUrl, setImageUrl] = useState("");
-  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
-  const [linkUrl, setLinkUrl] = useState("");
-
-  const onUploadImage = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        editor?.chain().focus().setImage({ src: URL.createObjectURL(file) }).run();
-      }
-    };
-    input.click();
-  };
-
-  const onInsertImageUrl = () => {
-    if (imageUrl) {
-      editor?.chain().focus().setImage({ src: imageUrl }).run();
-      setImageUrl("");
-      setIsImageDialogOpen(false);
-    }
-  };
-
-  const onInsertLink = () => {
-    if (linkUrl) {
-      editor?.chain().focus().extendMarkRange("link").setLink({ href: linkUrl }).run();
-      setLinkUrl("");
-      setIsLinkDialogOpen(false);
-    }
-  };
 
   const onNewDocument = async () => {
     try {
@@ -256,57 +203,7 @@ export const Navbar = ({ data }: NavbarProps) => {
                 </MenubarTrigger>
                 <MenubarContent>
                   <MenubarSub>
-                    <MenubarSubTrigger>
-                      <ImageIcon className="size-4 mr-2" />
-                      Image
-                    </MenubarSubTrigger>
-                    <MenubarSubContent>
-                      <MenubarItem onClick={onUploadImage}>
-                        <UploadIcon className="size-4 mr-2" />
-                        Upload from computer
-                      </MenubarItem>
-                      <MenubarItem
-                        onClick={(e) => { e.stopPropagation(); setIsImageDialogOpen(true); }}
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        <SearchIcon className="size-4 mr-2" />
-                        Paste image URL
-                      </MenubarItem>
-                    </MenubarSubContent>
-                  </MenubarSub>
-                  <MenubarItem
-                    onClick={(e) => { e.stopPropagation(); setLinkUrl(editor?.getAttributes("link").href || ""); setIsLinkDialogOpen(true); }}
-                    onSelect={(e) => e.preventDefault()}
-                  >
-                    <Link2Icon className="size-4 mr-2" />
-                    Link
-                  </MenubarItem>
-                  <MenubarSeparator />
-                  <MenubarSub>
-                    <MenubarSubTrigger>
-                      <ListIcon className="size-4 mr-2" />
-                      List
-                    </MenubarSubTrigger>
-                    <MenubarSubContent>
-                      <MenubarItem onClick={() => editor?.chain().focus().toggleBulletList().run()}>
-                        <ListIcon className="size-4 mr-2" />
-                        Bullet list
-                      </MenubarItem>
-                      <MenubarItem onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
-                        <ListOrderedIcon className="size-4 mr-2" />
-                        Ordered list
-                      </MenubarItem>
-                      <MenubarItem onClick={() => editor?.chain().focus().toggleTaskList().run()}>
-                        <ListTodoIcon className="size-4 mr-2" />
-                        Task list
-                      </MenubarItem>
-                    </MenubarSubContent>
-                  </MenubarSub>
-                  <MenubarSub>
-                    <MenubarSubTrigger>
-                      <TableIcon className="size-4 mr-2" />
-                      Table
-                    </MenubarSubTrigger>
+                    <MenubarSubTrigger>Table</MenubarSubTrigger>
                     <MenubarSubContent>
                       <MenubarItem onClick={() => insertTable({ rows: 1, cols: 1 })}>
                         1 x 1
@@ -322,11 +219,6 @@ export const Navbar = ({ data }: NavbarProps) => {
                       </MenubarItem>
                     </MenubarSubContent>
                   </MenubarSub>
-                  <MenubarSeparator />
-                  <MenubarItem onClick={() => editor?.chain().focus().setHorizontalRule().run()}>
-                    <MinusIcon className="size-4 mr-2" />
-                    Horizontal rule
-                  </MenubarItem>
                 </MenubarContent>
               </MenubarMenu>
               <MenubarMenu>
@@ -379,40 +271,6 @@ export const Navbar = ({ data }: NavbarProps) => {
         />
         <UserButton />
       </div>
-
-      <Dialog open={isImageDialogOpen} onOpenChange={setIsImageDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Insert image URL</DialogTitle>
-          </DialogHeader>
-          <Input
-            placeholder="https://example.com/image.png"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") onInsertImageUrl(); }}
-          />
-          <DialogFooter>
-            <Button onClick={onInsertImageUrl}>Insert</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Insert link</DialogTitle>
-          </DialogHeader>
-          <Input
-            placeholder="https://example.com"
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") onInsertLink(); }}
-          />
-          <DialogFooter>
-            <Button onClick={onInsertLink}>Apply</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </nav>
   );
 };
