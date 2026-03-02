@@ -1,7 +1,16 @@
 "use client";
 
-import { ClientSideSuspense, useThreads, useEditThreadMetadata } from "@liveblocks/react/suspense";
-import { AnchoredThreads, FloatingComposer, FloatingThreads } from "@liveblocks/react-tiptap";
+import {
+  ClientSideSuspense,
+  useThreads,
+  useEditThreadMetadata,
+  useMarkThreadAsResolved,
+} from "@liveblocks/react/suspense";
+import {
+  AnchoredThreads,
+  FloatingComposer,
+  FloatingThreads,
+} from "@liveblocks/react-tiptap";
 import { Thread } from "@liveblocks/react-ui";
 import { Editor } from "@tiptap/react";
 import { useSelf } from "@liveblocks/react/suspense";
@@ -9,7 +18,13 @@ import { acceptSuggestion, rejectSuggestion } from "@/lib/suggestion-helpers";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 
-export const Threads = ({ editor, onSnapshotSave }: { editor: Editor | null; onSnapshotSave?: () => void }) => {
+export const Threads = ({
+  editor,
+  onSnapshotSave,
+}: {
+  editor: Editor | null;
+  onSnapshotSave?: () => void;
+}) => {
   return (
     <ClientSideSuspense fallback={<></>}>
       <ThreadsList editor={editor} onSnapshotSave={onSnapshotSave} />
@@ -25,14 +40,15 @@ export const Threads = ({ editor, onSnapshotSave }: { editor: Editor | null; onS
 function getSuggestionTopOffset(
   editor: Editor | null,
   suggestionId: string,
-  containerEl: HTMLElement | null
+  containerEl: HTMLElement | null,
 ): number | null {
   if (!editor || !containerEl) return null;
 
   // Find the suggestion mark element in the editor DOM
   const editorEl = editor.view.dom;
-  const markEl =
-    editorEl.querySelector(`[data-suggestion-id="${suggestionId}"]`);
+  const markEl = editorEl.querySelector(
+    `[data-suggestion-id="${suggestionId}"]`,
+  );
 
   if (!markEl) return null;
 
@@ -44,21 +60,32 @@ function getSuggestionTopOffset(
   return markRect.top - containerRect.top;
 }
 
-export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null; onSnapshotSave?: () => void }) {
+export function ThreadsList({
+  editor,
+  onSnapshotSave,
+}: {
+  editor: Editor | null;
+  onSnapshotSave?: () => void;
+}) {
   // Fetch ALL threads (no resolved filter) — Liveblocks may auto-resolve "orphaned" threads
   // that lack a liveblocksCommentMark anchor. Our suggestion threads are created via createThread
   // directly (no anchor mark), so relying on resolved:false would hide them after a reconnect.
   // We manage visibility ourselves using the custom `status` metadata field instead.
-  const { threads } = useThreads();
+  const { threads } = useThreads({
+    query: {
+      resolved: false,
+    },
+  });
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
   const editThreadMetadata = useEditThreadMetadata();
+  const markThreadAsResolved = useMarkThreadAsResolved();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Track vertical positions for each suggestion thread
-  const [threadPositions, setThreadPositions] = useState<
-    Map<string, number>
-  >(new Map());
+  const [threadPositions, setThreadPositions] = useState<Map<string, number>>(
+    new Map(),
+  );
 
   // Separate suggestion threads from regular comment threads.
   // Memoized so their references only change when `threads` actually changes —
@@ -66,11 +93,11 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   // cascade through updatePositions → setThreadPositions → re-render → repeat.
   const suggestionThreads = useMemo(
     () => threads.filter((t) => t.metadata?.suggestionId),
-    [threads]
+    [threads],
   );
   const regularThreads = useMemo(
-    () => threads.filter((t) => !t.metadata?.suggestionId && !t.resolved),
-    [threads]
+    () => threads.filter((t) => !t.metadata?.suggestionId),
+    [threads],
   );
 
   // One-time mount diagnostic: log thread counts to trace the reload disappearance bug
@@ -78,18 +105,30 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   useEffect(() => {
     if (mountLoggedRef.current) return;
     mountLoggedRef.current = true;
-    const pending = suggestionThreads.filter((t) => t.metadata?.status === "pending");
+    const pending = suggestionThreads.filter(
+      (t) => t.metadata?.status === "pending",
+    );
     console.log(
-      "[Threads] Mount — total:", threads.length,
-      "suggestion:", suggestionThreads.length,
-      "pending:", pending.length
+      "[Threads] Mount — total:",
+      threads.length,
+      "suggestion:",
+      suggestionThreads.length,
+      "pending:",
+      pending.length,
     );
     if (pending.length > 0) {
       pending.forEach((t) =>
-        console.log("  Pending thread:", t.id, "suggestionId:", t.metadata?.suggestionId, "resolved:", t.resolved)
+        console.log(
+          "  Pending thread:",
+          t.id,
+          "suggestionId:",
+          t.metadata?.suggestionId,
+          "resolved:",
+          t.resolved,
+        ),
       );
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // One-time editor-ready diagnostic: log suggestion marks in the DOM
@@ -98,8 +137,14 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
     if (!editor || editorLoggedRef.current) return;
     editorLoggedRef.current = true;
     const marks = editor.view.dom.querySelectorAll("[data-suggestion-id]");
-    console.log("[Threads] Editor ready — suggestion marks in DOM:", marks.length);
-    marks.forEach((el) => console.log("  Mark:", el.getAttribute("data-suggestion-id"), "threadId:", el.getAttribute("data-comment-thread-id")));
+    marks.forEach((el) =>
+      console.log(
+        "  Mark:",
+        el.getAttribute("data-suggestion-id"),
+        "threadId:",
+        el.getAttribute("data-comment-thread-id"),
+      ),
+    );
   }, [editor]);
 
   // Calculate positions for suggestion threads
@@ -115,7 +160,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
       const top = getSuggestionTopOffset(
         editor,
         suggestionId,
-        containerRef.current
+        containerRef.current,
       );
       if (top !== null) {
         newPositions.set(thread.id, top);
@@ -143,7 +188,7 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
       requestAnimationFrame(updatePositions);
     };
     const scrollContainer = document.querySelector(
-      ".size-full.overflow-x-auto"
+      ".size-full.overflow-x-auto",
     );
     scrollContainer?.addEventListener("scroll", scrollHandler);
     window.addEventListener("scroll", scrollHandler);
@@ -161,21 +206,20 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   const handleAccept = (
     threadId: string,
     suggestionId: string,
-    changeType: string
+    changeType: string,
   ) => {
     if (!editor) return;
-    console.log("[Threads] Accepting suggestion:", suggestionId, "type:", changeType);
-    if (changeType === "nodeFormat" || changeType === "tableInsert" || changeType === "tableDelete") {
+    if (
+      changeType === "nodeFormat" ||
+      changeType === "tableInsert" ||
+      changeType === "tableDelete"
+    ) {
       editor.chain().acceptNodeSuggestion(suggestionId).run();
     } else {
       acceptSuggestion(editor, suggestionId);
     }
-    editThreadMetadata({
-      threadId,
-      metadata: {
-        status: "accepted",
-      },
-    });
+    editThreadMetadata({ threadId, metadata: { status: "accepted" } });
+    markThreadAsResolved(threadId);
     // Save a clean snapshot after accepting (document content changed)
     onSnapshotSave?.();
   };
@@ -183,10 +227,9 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
   const handleReject = (
     threadId: string,
     suggestionId: string,
-    changeType: string
+    changeType: string,
   ) => {
     if (!editor) return;
-    console.log("[Threads] Rejecting suggestion:", suggestionId, "type:", changeType);
     if (changeType === "tableInsert") {
       editor.chain().rejectNodeSuggestion(suggestionId, "insert").run();
     } else if (changeType === "tableDelete") {
@@ -196,12 +239,8 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
     } else {
       rejectSuggestion(editor, suggestionId);
     }
-    editThreadMetadata({
-      threadId,
-      metadata: {
-        status: "rejected",
-      },
-    });
+    editThreadMetadata({ threadId, metadata: { status: "rejected" } });
+    markThreadAsResolved(threadId);
     // Save a clean snapshot after rejecting (document content changed)
     onSnapshotSave?.();
   };
@@ -222,17 +261,11 @@ export function ThreadsList({ editor, onSnapshotSave }: { editor: Editor | null;
 
       {/* Suggestion threads positioned at the level of their marks */}
       {sortedSuggestionThreads.length > 0 && (
-        <div
-          ref={containerRef}
-          className="suggestion-threads-panel"
-        >
+        <div ref={containerRef} className="suggestion-threads-panel">
           {sortedSuggestionThreads.map((thread) => {
             const suggestionId = thread.metadata?.suggestionId as string;
             const changeType = thread.metadata?.changeType as string;
-            const status = thread.metadata?.status as string;
             const topOffset = threadPositions.get(thread.id);
-
-            if (status === "accepted" || status === "rejected") return null;
 
             return (
               <div
