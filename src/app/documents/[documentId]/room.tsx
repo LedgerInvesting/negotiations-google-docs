@@ -33,7 +33,7 @@ export function Room({ children }: { children: ReactNode }) {
 
   return (
     <LiveblocksProvider
-      throttle={1000}
+      throttle={100}
       authEndpoint={async () => {
         const endpoint = "/api/liveblocks-auth";
         const room = params.documentId as string;

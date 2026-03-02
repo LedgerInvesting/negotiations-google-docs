@@ -14,7 +14,7 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     nodeSuggestion: {
       acceptNodeSuggestion: (suggestionId: string) => ReturnType;
-      rejectNodeSuggestion: (suggestionId: string) => ReturnType;
+      rejectNodeSuggestion: (suggestionId: string, action?: "insert" | "delete") => ReturnType;
       updateNodeSuggestionThreadId: (suggestionId: string, threadId: string) => ReturnType;
     };
   }
@@ -140,9 +140,9 @@ export const NodeSuggestion = Extension.create({
         },
 
       rejectNodeSuggestion:
-        (suggestionId: string) =>
+        (suggestionId: string, action?: "insert" | "delete") =>
         ({ tr, state, dispatch }) => {
-          console.log("[NodeSuggestion] Rejecting node suggestion:", suggestionId);
+          console.log("[NodeSuggestion] Rejecting node suggestion:", suggestionId, "action:", action ?? "(from attrs)");
           tr.setMeta("suggestionMode", true);
           tr.setMeta("addToHistory", true);
 
@@ -155,16 +155,24 @@ export const NodeSuggestion = Extension.create({
             }
           });
 
+          console.log("[NodeSuggestion] Found", nodesToUpdate.length, "node(s) to reject");
+
           // Process in reverse so deletions don't shift earlier positions
           nodesToUpdate.reverse().forEach(({ pos, node }) => {
-            if (node.attrs.nodeSuggestionAction === "insert") {
+            // Use the explicitly-passed action as the authoritative source when provided,
+            // falling back to the node attribute (which may be missing after a Yjs sync).
+            const effectiveAction = action ?? node.attrs.nodeSuggestionAction;
+            console.log("[NodeSuggestion] Node type:", node.type.name, "effectiveAction:", effectiveAction, "attrAction:", node.attrs.nodeSuggestionAction);
+
+            if (effectiveAction === "insert") {
               // Rejecting an insertion → delete the node from the document
+              console.log("[NodeSuggestion] Deleting node at pos", pos, "nodeSize", node.nodeSize);
               tr.delete(pos, pos + node.nodeSize);
               modified = true;
               return;
             }
 
-            if (node.attrs.nodeSuggestionAction === "delete") {
+            if (effectiveAction === "delete") {
               // Rejecting a deletion → keep the node, just strip suggestion attrs
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,

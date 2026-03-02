@@ -122,11 +122,10 @@ export const Editor = ({ initialContent }: EditorProps) => {
     }, 3000);
   }, [saveCleanSnapshot]);
   
-  // Track pending thread operations with debounce
-  const pendingThreadsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const editorRef = useRef<ReturnType<typeof useEditor>>(null);
 
-  // Callback to create comment threads for suggestions with debouncing
+  // Callback to create comment threads for suggestions
+  // Note: SuggestionMode already debounces 1.5s before calling this — no extra delay needed.
   const handleCreateSuggestion = useCallback(async (data: {
     suggestionId: string;
     type: "insert" | "delete" | "replace" | "format" | "nodeFormat" | "tableInsert" | "tableDelete";
@@ -138,85 +137,65 @@ export const Editor = ({ initialContent }: EditorProps) => {
     from: number;
     to: number;
   }) => {
-    console.log('[Editor] Suggestion created:', data);
-    
-    // Clear any existing timeout for this suggestion
-    const existingTimeout = pendingThreadsRef.current.get(data.suggestionId);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-    }
-    
-    // Schedule thread creation after user stops typing
-    return new Promise<string>((resolve) => {
-      const timeout = setTimeout(async () => {
-        try {
-          console.log('[Editor] Creating thread (debounced):', data.suggestionId);
-          
-          let label: string;
-          if (data.type === "replace") {
-            label = `Replace "${(data.oldText ?? "").substring(0, 50)}${(data.oldText ?? "").length > 50 ? "..." : ""}" with "${(data.newText ?? "").substring(0, 50)}${(data.newText ?? "").length > 50 ? "..." : ""}"`;
-          } else if (data.type === "format") {
-            const truncText = data.text.substring(0, 40) + (data.text.length > 40 ? "…" : "");
-            label = `Format "${truncText}": ${data.description ?? "style change"}`;
-          } else if (data.type === "nodeFormat") {
-            label = `Block format: ${data.description ?? data.text}`;
-          } else if (data.type === "tableInsert") {
-            label = "Suggested table insertion";
-          } else if (data.type === "tableDelete") {
-            label = "Suggested table deletion";
-          } else {
-            label = `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
-          }
+    console.log('[Editor] Creating thread for suggestion:', data.suggestionId, data.type);
 
-          const thread = await createThread({
-            body: {
-              version: 1,
-              content: [
+    try {
+      let label: string;
+      if (data.type === "replace") {
+        label = `Replace "${(data.oldText ?? "").substring(0, 50)}${(data.oldText ?? "").length > 50 ? "..." : ""}" with "${(data.newText ?? "").substring(0, 50)}${(data.newText ?? "").length > 50 ? "..." : ""}"`;
+      } else if (data.type === "format") {
+        const truncText = data.text.substring(0, 40) + (data.text.length > 40 ? "…" : "");
+        label = `Format "${truncText}": ${data.description ?? "style change"}`;
+      } else if (data.type === "nodeFormat") {
+        label = `Block format: ${data.description ?? data.text}`;
+      } else if (data.type === "tableInsert") {
+        label = "Suggested table insertion";
+      } else if (data.type === "tableDelete") {
+        label = "Suggested table deletion";
+      } else {
+        label = `Suggested ${data.type === "insert" ? "insertion" : "deletion"}: "${data.text.substring(0, 50)}${data.text.length > 50 ? "..." : ""}"`;
+      }
+
+      const thread = createThread({
+        body: {
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              children: [
                 {
-                  type: "paragraph",
-                  children: [
-                    {
-                      text: label,
-                    },
-                  ],
+                  text: label,
                 },
               ],
             },
-            metadata: {
-              suggestionId: data.suggestionId,
-              changeType: data.type,
-              status: "pending",
-              nodeRevertData: data.type === "nodeFormat" ? (data.oldNodeData ?? undefined) : undefined,
-              userId: currentUser?.id,
-            },
-          });
+          ],
+        },
+        metadata: {
+          suggestionId: data.suggestionId,
+          changeType: data.type,
+          status: "pending",
+          nodeRevertData: data.type === "nodeFormat" ? (data.oldNodeData ?? undefined) : undefined,
+          userId: currentUser?.id,
+        },
+      });
 
-          console.log('[Editor] Thread created successfully:', thread.id);
+      console.log('[Editor] Thread created:', thread.id);
 
-          // Update the suggestion's thread ID
-          if (editorRef.current) {
-            if (data.type === "nodeFormat" || data.type === "tableInsert" || data.type === "tableDelete") {
-              editorRef.current.chain().updateNodeSuggestionThreadId(data.suggestionId, thread.id).run();
-              console.log('[Editor] Node suggestion thread ID updated:', thread.id);
-            } else {
-              const updated = updateSuggestionThreadId(editorRef.current, data.suggestionId, thread.id);
-              console.log('[Editor] Thread ID updated:', updated);
-            }
-          }
-          
-          pendingThreadsRef.current.delete(data.suggestionId);
-          resolve(thread.id);
-        } catch (error) {
-          console.error("[Editor] Failed to create thread:", error);
-          pendingThreadsRef.current.delete(data.suggestionId);
-          // Return temp ID on error
-          resolve(`temp-${data.suggestionId}`);
+      // Update the suggestion mark's thread ID from temp to real
+      if (editorRef.current) {
+        if (data.type === "nodeFormat" || data.type === "tableInsert" || data.type === "tableDelete") {
+          editorRef.current.chain().updateNodeSuggestionThreadId(data.suggestionId, thread.id).run();
+        } else {
+          updateSuggestionThreadId(editorRef.current, data.suggestionId, thread.id);
         }
-      }, 1500); // Wait 1.5s after last keystroke
-      
-      pendingThreadsRef.current.set(data.suggestionId, timeout);
-    });
-  }, [createThread]);
+      }
+
+      return thread.id;
+    } catch (error) {
+      console.error("[Editor] Failed to create thread:", error);
+      return `temp-${data.suggestionId}`;
+    }
+  }, [createThread, currentUser?.id]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -229,9 +208,6 @@ export const Editor = ({ initialContent }: EditorProps) => {
       console.log('[Editor] Editor destroyed');
       setEditor(null);
       editorRef.current = null;
-      // Clear all pending thread operations
-      pendingThreadsRef.current.forEach(timeout => clearTimeout(timeout));
-      pendingThreadsRef.current.clear();
     },
     onUpdate({ editor }) {
       setEditor(editor);
