@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -7,16 +8,20 @@ import Link from "next/link";
 import { BsFilePdf } from "react-icons/bs";
 import {
   BoldIcon,
+  ChevronDownIcon,
+  CheckIcon,
   FileIcon,
   FileJsonIcon,
   FilePenIcon,
   FilePlusIcon,
   FileTextIcon,
+  GitPullRequestDraftIcon,
   GlobeIcon,
   ItalicIcon,
   PrinterIcon,
   Redo2Icon,
   RemoveFormattingIcon,
+  ScanEyeIcon,
   StrikethroughIcon,
   TextIcon,
   // TrashIcon,
@@ -38,11 +43,18 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from "@/components/ui/menubar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import { Avatars } from "./avatars";
 
 import { DocumentInput } from "./document-input";
 import { useEditorStore } from "@/store/use-editor-store";
+import type { ViewMode } from "@/store/use-editor-store";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Inbox } from "./inbox";
 import { Document } from "@/hooks/use-documents";
@@ -54,9 +66,24 @@ interface NavbarProps {
   data: Document;
 }
 
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string; icon: React.ReactNode; description: string }[] = [
+  {
+    value: "suggestion",
+    label: "Suggestion Mode",
+    icon: <GitPullRequestDraftIcon className="size-4" />,
+    description: "Show tracked changes",
+  },
+  {
+    value: "result",
+    label: "Result Mode",
+    icon: <ScanEyeIcon className="size-4" />,
+    description: "Show final result",
+  },
+];
+
 export const Navbar = ({ data }: NavbarProps) => {
   const router = useRouter();
-  const { editor } = useEditorStore();
+  const { editor, viewMode, setViewMode } = useEditorStore();
   const { create } = useCreateDocument();
 
   const onNewDocument = async () => {
@@ -261,6 +288,33 @@ export const Navbar = ({ data }: NavbarProps) => {
         </div>
       </div>
       <div className="flex gap-3 items-center pl-6">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors">
+              {VIEW_MODE_OPTIONS.find((o) => o.value === viewMode)?.icon}
+              <span>{VIEW_MODE_OPTIONS.find((o) => o.value === viewMode)?.label}</span>
+              <ChevronDownIcon className="size-3.5 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            {VIEW_MODE_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => setViewMode(option.value)}
+                className="flex items-start gap-2 py-2"
+              >
+                <span className="mt-0.5 shrink-0">{option.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">{option.label}</div>
+                  <div className="text-xs text-muted-foreground">{option.description}</div>
+                </div>
+                {viewMode === option.value && (
+                  <CheckIcon className="size-4 shrink-0 mt-0.5 text-primary" />
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Avatars />
         <Inbox />
         <OrganizationSwitcher

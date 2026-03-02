@@ -32,7 +32,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
 import { updateSuggestionThreadId } from "@/lib/suggestion-validators";
-import { cleanDocumentJSON } from "@/lib/clean-document";
+import { cleanDocumentJSON, resultDocumentJSON } from "@/lib/clean-document";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
@@ -61,7 +61,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
     offlineSupport_experimental: true,
   });
   
-  const { setEditor } = useEditorStore();
+  const { setEditor, viewMode } = useEditorStore();
   const params = useParams();
   const documentId = params.documentId as string;
   
@@ -303,6 +303,66 @@ export const Editor = ({ initialContent }: EditorProps) => {
     };
   }, [editor, isOwner, debouncedSaveSnapshot]);
 
+  // Read-only result editor (always mounted — hooks cannot be conditional)
+  // Shows the document with all suggestions accepted (no Liveblocks, no suggestion extensions)
+  const resultEditor = useEditor({
+    immediatelyRender: false,
+    editable: false,
+    editorProps: {
+      attributes: {
+        style: `padding-left: ${leftMargin}px; padding-right: ${rightMargin}px;`,
+        class:
+          "focus:outline-none print:border-0 border bg-white border-editor-border flex flex-col min-h-[1054px] w-[816px] pt-10 pr-14 pb-10 cursor-default",
+      },
+    },
+    extensions: [
+      StarterKit.configure({ undoRedo: false }),
+      Table,
+      TableCell,
+      TableHeader,
+      TableRow,
+      TaskList,
+      Image,
+      ImageResize,
+      Underline,
+      FontFamily,
+      TextStyle,
+      Color,
+      LineHeightExtension.configure({
+        types: ["heading", "paragraph"],
+        defaultLineHeight: "1.5",
+      }),
+      FontSizeExtensions,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        defaultProtocol: "https",
+      }),
+      Highlight.configure({ multicolor: true }),
+      TaskItem.configure({ nested: true }),
+    ],
+  });
+
+  // Sync result editor content when switching to result mode or when main editor updates
+  useEffect(() => {
+    if (!editor || !resultEditor) return;
+
+    const syncResult = () => {
+      if (viewMode === "result") {
+        const content = cleanDocumentJSON(editor.getJSON());
+        resultEditor.commands.setContent(content, false);
+      }
+    };
+
+    // Sync immediately (handles mode switches)
+    syncResult();
+
+    // Keep synced while in result mode as collaborators continue editing
+    editor.on("update", syncResult);
+    return () => editor.off("update", syncResult);
+  }, [editor, resultEditor, viewMode]);
+
   // Don't render editor until we have user data
   if (!currentUser) {
     return (
@@ -319,18 +379,27 @@ export const Editor = ({ initialContent }: EditorProps) => {
           <Ruler />
           <div className="relative py-4 print:py-0">
             {/* Suggestion pending indicator - shown during 1.5s debounce */}
-            {!isOwner && isSuggestionPending && (
+            {!isOwner && isSuggestionPending && viewMode === "suggestion" && (
               <div className="suggestion-pending-indicator">
                 <span className="suggestion-pending-dot" />
                 <span>Tracking changes…</span>
               </div>
             )}
-            <EditorContent editor={editor} />
+            {/* Main editor: kept mounted in result mode so Liveblocks stays connected */}
+            <div style={{ display: viewMode === "result" ? "none" : "block" }}>
+              <EditorContent editor={editor} />
+            </div>
+            {/* Result editor: read-only view with all suggestions accepted */}
+            <div style={{ display: viewMode === "result" ? "block" : "none" }} className="pointer-events-none select-none">
+              <EditorContent editor={resultEditor} />
+            </div>
           </div>
         </div>
-        <div className="threads-panel-right print:hidden">
-          <Threads editor={editor} onSnapshotSave={isOwner ? saveCleanSnapshot : undefined} />
-        </div>
+        {viewMode === "suggestion" && (
+          <div className="threads-panel-right print:hidden">
+            <Threads editor={editor} onSnapshotSave={isOwner ? saveCleanSnapshot : undefined} />
+          </div>
+        )}
       </div>
     </div>
   );
