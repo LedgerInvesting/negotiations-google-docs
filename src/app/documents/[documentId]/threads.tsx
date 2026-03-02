@@ -71,11 +71,7 @@ export function ThreadsList({
   // that lack a liveblocksCommentMark anchor. Our suggestion threads are created via createThread
   // directly (no anchor mark), so relying on resolved:false would hide them after a reconnect.
   // We manage visibility ourselves using the custom `status` metadata field instead.
-  const { threads } = useThreads({
-    query: {
-      resolved: false,
-    },
-  });
+  const { threads } = useThreads();
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
   const editThreadMetadata = useEditThreadMetadata();
@@ -92,11 +88,11 @@ export function ThreadsList({
   // prevents an infinite loop where a new array reference each render would
   // cascade through updatePositions → setThreadPositions → re-render → repeat.
   const suggestionThreads = useMemo(
-    () => threads.filter((t) => t.metadata?.suggestionId),
+    () => threads.filter((t) => t.metadata?.suggestionId && !t.resolved),
     [threads],
   );
   const regularThreads = useMemo(
-    () => threads.filter((t) => !t.metadata?.suggestionId),
+    () => threads.filter((t) => !t.metadata?.suggestionId && !t.resolved),
     [threads],
   );
 
@@ -146,6 +142,83 @@ export function ThreadsList({
       ),
     );
   }, [editor]);
+
+  // Once threads are loaded (guaranteed by ClientSideSuspense) and the editor is ready,
+  // scan the document for suggestion marks whose suggestionId has no matching thread.
+  // Any such mark is orphaned — reject it to revert the suggestion content.
+  // Runs once per mount; `threads` is the authoritative source of truth.
+  const orphanCleanupRanRef = useRef(false);
+  useEffect(() => {
+    if (!editor || orphanCleanupRanRef.current) return;
+    orphanCleanupRanRef.current = true;
+
+    // Build the set of suggestionIds that are covered by a Liveblocks thread.
+    const threadSuggestionIds = new Set(
+      threads.flatMap((t) =>
+        t.metadata?.suggestionId ? [t.metadata.suggestionId] : [],
+      ),
+    );
+
+    const toReject: Array<{
+      suggestionId: string;
+      kind: "text" | "node";
+      action?: "insert" | "delete";
+      userId?: string; // original suggester, from mark attrs
+    }> = [];
+    const seen = new Set<string>();
+
+    editor.state.doc.descendants((node) => {
+      // Text-level suggestion marks
+      if (node.isText) {
+        node.marks.forEach((mark) => {
+          if (
+            mark.type.name !== "suggestionInsert" &&
+            mark.type.name !== "suggestionDelete"
+          )
+            return;
+          const { suggestionId, userId } = mark.attrs;
+          if (!suggestionId || seen.has(suggestionId)) return;
+          if (!threadSuggestionIds.has(suggestionId)) {
+            seen.add(suggestionId);
+            toReject.push({ suggestionId, kind: "text", userId: userId ?? undefined });
+          }
+        });
+      }
+      // Node-level suggestion attrs
+      const nid = node.attrs?.nodeSuggestionId;
+      if (nid && !seen.has(nid)) {
+        if (!threadSuggestionIds.has(nid)) {
+          seen.add(nid);
+          toReject.push({
+            suggestionId: nid,
+            kind: "node",
+            action: node.attrs?.nodeSuggestionAction ?? undefined,
+            userId: node.attrs?.nodeSuggestionUserId ?? undefined,
+          });
+        }
+      }
+    });
+
+    if (toReject.length === 0) {
+      console.log("[Threads] No orphaned suggestions found");
+      return;
+    }
+
+    console.log(
+      "[Threads] Reverting",
+      toReject.length,
+      "orphaned suggestion(s):",
+      toReject.map((r) => `${r.suggestionId} (owner: ${r.userId ?? "unknown"})`),
+    );
+
+    toReject.forEach(({ suggestionId, kind, action }) => {
+      if (kind === "text") {
+        editor.chain().rejectSuggestion(suggestionId).run();
+      } else {
+        editor.chain().rejectNodeSuggestion(suggestionId, action).run();
+      }
+    });
+  }, [editor, threads]);
 
   // Calculate positions for suggestion threads
   const updatePositions = useCallback(() => {

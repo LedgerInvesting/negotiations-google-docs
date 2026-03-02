@@ -1145,7 +1145,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 console.log('[SuggestionMode] Creating suggestions for detected changes');
                 createSuggestionsForChanges(view, changes, userId, onCreateSuggestion);
                 
-              }, 1500); // 1.5 second debounce
+              }, 1000); // 1 second debounce
               
               return {
                 previousDoc: baselineDoc,
