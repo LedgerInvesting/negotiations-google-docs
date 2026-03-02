@@ -54,6 +54,7 @@ import { Avatars } from "./avatars";
 
 import { DocumentInput } from "./document-input";
 import { useEditorStore } from "@/store/use-editor-store";
+import { useSelf } from "@liveblocks/react";
 import type { ViewMode } from "@/store/use-editor-store";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Inbox } from "./inbox";
@@ -84,6 +85,8 @@ const VIEW_MODE_OPTIONS: { value: ViewMode; label: string; icon: React.ReactNode
 export const Navbar = ({ data }: NavbarProps) => {
   const router = useRouter();
   const { editor, viewMode, setViewMode } = useEditorStore();
+  const currentUser = useSelf();
+  const isOwner = currentUser?.info?.isOwner === true;
   const { create } = useCreateDocument();
 
   const onNewDocument = async () => {
@@ -214,14 +217,18 @@ export const Navbar = ({ data }: NavbarProps) => {
                   Edit
                 </MenubarTrigger>
                 <MenubarContent>
-                  <MenubarItem onClick={() => editor?.chain().focus().undo().run()}>
-                    <Undo2Icon className="mr-2 size-4" />
-                    Undo <MenubarShortcut>&#x2318; + Z</MenubarShortcut>
-                  </MenubarItem>
-                  <MenubarItem onClick={() => editor?.chain().focus().redo().run()}>
-                    <Redo2Icon className="mr-2 size-4" />
-                    Redo <MenubarShortcut>&#x2318; + Y</MenubarShortcut>
-                  </MenubarItem>
+                  {isOwner && (
+                    <MenubarItem onClick={() => editor?.chain().focus().undo().run()}>
+                      <Undo2Icon className="mr-2 size-4" />
+                      Undo <MenubarShortcut>&#x2318; + Z</MenubarShortcut>
+                    </MenubarItem>
+                  )}
+                  {isOwner && (
+                    <MenubarItem onClick={() => editor?.chain().focus().redo().run()}>
+                      <Redo2Icon className="mr-2 size-4" />
+                      Redo <MenubarShortcut>&#x2318; + Y</MenubarShortcut>
+                    </MenubarItem>
+                  )}
                 </MenubarContent>
               </MenubarMenu>
               <MenubarMenu>
@@ -277,10 +284,12 @@ export const Navbar = ({ data }: NavbarProps) => {
                       </MenubarItem>
                     </MenubarSubContent>
                   </MenubarSub>
-                  <MenubarItem onClick={() => editor?.chain().focus().unsetAllMarks().run()}>
-                    <RemoveFormattingIcon className="size-4 mr-2" />
-                    Clear formatting
-                  </MenubarItem>
+                  {isOwner && (
+                    <MenubarItem onClick={() => editor?.chain().focus().unsetAllMarks().run()}>
+                      <RemoveFormattingIcon className="size-4 mr-2" />
+                      Clear formatting
+                    </MenubarItem>
+                  )}
                 </MenubarContent>
               </MenubarMenu>
             </Menubar>

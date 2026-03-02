@@ -3,6 +3,7 @@
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/store/use-editor-store";
+import { useSelf } from "@liveblocks/react";
 
 // types
 import { type ColorResult, SketchPicker } from "react-color";
@@ -572,23 +573,28 @@ const ToolbarButton = ({
 
 export const Toolbar = () => {
   const { editor } = useEditorStore();
+  const currentUser = useSelf();
+  const isOwner = currentUser?.info?.isOwner === true;
 
   const sections: {
     label: string;
     icon: LucideIcon;
     onClick: () => void;
     isActive?: boolean;
+    ownerOnly?: boolean;
   }[][] = [
     [
       {
         label: "Undo",
         icon: Undo2Icon,
         onClick: () => editor?.chain().focus().undo().run(),
+        ownerOnly: true,
       },
       {
         label: "Redo",
         icon: Redo2Icon,
         onClick: () => editor?.chain().focus().redo().run(),
+        ownerOnly: true,
       },
       {
         label: "Print",
@@ -645,13 +651,14 @@ export const Toolbar = () => {
         icon: RemoveFormattingIcon,
         onClick: () => editor?.chain().focus().unsetAllMarks().run(),
         isActive: editor?.isActive("taskList"),
+        ownerOnly: true,
       },
     ],
   ];
 
   return (
     <div className="bg-[#F1F4F9] px-2.5 py-0.5 rounded-[24px] min-h-[40px] flex items-center gap-x-0.5 overflow-x-auto">
-      {sections[0].map((item) => (
+      {sections[0].filter(item => !item.ownerOnly || isOwner).map((item) => (
         <ToolbarButton key={item.label} {...item} />
       ))}
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
@@ -661,7 +668,7 @@ export const Toolbar = () => {
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
       <FontSizeButton />
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
-      {sections[1].map((item) => (
+      {sections[1].filter(item => !item.ownerOnly || isOwner).map((item) => (
         <ToolbarButton key={item.label} {...item} />
       ))}
       <TextColorButton />
@@ -672,7 +679,7 @@ export const Toolbar = () => {
       <AlignButton />
       <LineHeightButton />
       <ListButton />
-      {sections[2].map((item) => (
+      {sections[2].filter(item => !item.ownerOnly || isOwner).map((item) => (
         <ToolbarButton key={item.label} {...item} />
       ))}
     </div>
