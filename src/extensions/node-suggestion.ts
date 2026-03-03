@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import { Fragment } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 const NODE_SUGGESTION_TYPES = [
@@ -196,7 +197,40 @@ export const NodeSuggestion = Extension.create({
                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 const { nodeSuggestionId, nodeSuggestionUserId, nodeSuggestionCommentThreadId,
                         nodeSuggestionTimestamp, nodeSuggestionOldData: _old, nodeSuggestionAction, ...oldCleanAttrs } = oldData.attrs;
-                tr.setNodeMarkup(pos, oldType, oldCleanAttrs);
+
+                const listTypes = ["bulletList", "orderedList", "taskList"];
+                const currentIsList = listTypes.includes(node.type.name);
+                const oldIsList = listTypes.includes(oldData.type);
+
+                if (currentIsList && !oldIsList) {
+                  // List → inline container (e.g. bulletList → paragraph/heading).
+                  // setNodeMarkup would leave listItem children inside the new block, which
+                  // is invalid. Instead, extract inline content from each list item.
+                  const newNodes: ProseMirrorNode[] = [];
+                  node.forEach((listItem) => {
+                    listItem.forEach((innerBlock) => {
+                      newNodes.push(oldType.create(oldCleanAttrs, innerBlock.content));
+                    });
+                  });
+                  if (newNodes.length > 0) {
+                    tr.replaceWith(pos, pos + node.nodeSize,
+                      newNodes.length === 1 ? newNodes[0] : Fragment.fromArray(newNodes));
+                  }
+                } else if (!currentIsList && oldIsList) {
+                  // Inline container → list (e.g. paragraph → bulletList).
+                  // Wrap the current inline content into a list item.
+                  const listItemType = state.schema.nodes.listItem;
+                  const innerParaType = state.schema.nodes.paragraph;
+                  if (listItemType && innerParaType) {
+                    const innerPara = innerParaType.create({}, node.content);
+                    const listItem = listItemType.create({}, innerPara);
+                    tr.replaceWith(pos, pos + node.nodeSize, oldType.create({}, listItem));
+                  }
+                } else {
+                  // Same content-model category (both inline containers or both list types):
+                  // setNodeMarkup is safe.
+                  tr.setNodeMarkup(pos, oldType, oldCleanAttrs);
+                }
                 modified = true;
                 return;
               }
