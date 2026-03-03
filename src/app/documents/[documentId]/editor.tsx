@@ -32,7 +32,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useEditorStore } from "@/store/use-editor-store";
 import { updateSuggestionThreadId } from "@/lib/suggestion-validators";
-import { cleanDocumentJSON, resultDocumentJSON } from "@/lib/clean-document";
+import { cleanDocumentJSON } from "@/lib/clean-document";
 import { FontSizeExtensions } from "@/extensions/font-size";
 import { LineHeightExtension } from "@/extensions/line-height";
 import { SuggestionInsert, SuggestionDelete } from "@/extensions/suggestion";
@@ -396,7 +396,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
 
     // Keep synced while in result mode as collaborators continue editing
     editor.on("update", syncResult);
-    return () => editor.off("update", syncResult);
+    return () => { editor.off("update", syncResult); };
   }, [editor, resultEditor, viewMode]);
 
   // Don't render editor until we have user data
