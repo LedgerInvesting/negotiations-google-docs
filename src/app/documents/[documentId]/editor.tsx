@@ -26,7 +26,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { Link } from "@tiptap/extension-link";
 
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
-import { useStorage, useSelf, useCreateThread } from "@liveblocks/react/suspense";
+import { useStorage, useSelf, useCreateThread, useThreads, useEditComment, useEditThreadMetadata, useMarkThreadAsResolved } from "@liveblocks/react/suspense";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -53,6 +53,12 @@ export const Editor = ({ initialContent }: EditorProps) => {
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
   const createThread = useCreateThread();
+  const { threads } = useThreads();
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+  const editComment = useEditComment();
+  const editThreadMetadata = useEditThreadMetadata();
+  const markThreadAsResolved = useMarkThreadAsResolved();
 
   console.log('[Editor] Current user:', currentUser?.id, 'Is owner:', isOwner);
 
@@ -197,6 +203,35 @@ export const Editor = ({ initialContent }: EditorProps) => {
     }
   }, [createThread, currentUser?.id]);
 
+  // Callback to update an existing suggestion thread when the user edits their own suggestion mark.
+  // Uses a ref for threads to avoid recreating this callback on every thread update.
+  const handleUpdateSuggestion = useCallback(async (data: {
+    suggestionId: string;
+    newText: string;
+  }) => {
+    const thread = threadsRef.current.find((t) => t.metadata?.suggestionId === data.suggestionId);
+    if (!thread || thread.comments.length === 0) return;
+
+    if (data.newText === "") {
+      // All text in the suggestion was deleted — cancel the thread.
+      console.log('[Editor] Cancelling empty suggestion thread:', thread.id);
+      editThreadMetadata({ threadId: thread.id, metadata: { status: "rejected" } });
+      markThreadAsResolved(thread.id);
+      return;
+    }
+
+    const label = `Suggested insertion: "${data.newText.substring(0, 50)}${data.newText.length > 50 ? "..." : ""}"`;
+    console.log('[Editor] Updating suggestion thread:', thread.id, label);
+    editComment({
+      threadId: thread.id,
+      commentId: thread.comments[0].id,
+      body: {
+        version: 1,
+        content: [{ type: "paragraph", children: [{ text: label }] }],
+      },
+    });
+  }, [editComment, editThreadMetadata, markThreadAsResolved]);
+
   const editor = useEditor({
     immediatelyRender: false,
     onCreate({ editor }) {
@@ -243,6 +278,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
         isOwner,
         userId: currentUser?.id || "",
         onCreateSuggestion: handleCreateSuggestion,
+        onUpdateSuggestion: handleUpdateSuggestion,
         onPendingChange: setIsSuggestionPending,
       }),
       Table,

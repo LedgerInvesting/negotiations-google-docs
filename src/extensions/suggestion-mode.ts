@@ -18,6 +18,10 @@ export interface SuggestionModeOptions {
     from: number;
     to: number;
   }) => Promise<string>; // Returns commentThreadId
+  onUpdateSuggestion?: (data: {
+    suggestionId: string;
+    newText: string;
+  }) => Promise<void>;
   onPendingChange?: (isPending: boolean) => void;
 }
 
@@ -37,6 +41,8 @@ interface DeleteChange {
   from: number;
   to: number;
   text: string;
+  /** Set when the deleted text was entirely within a suggestionInsert mark owned by the current user. */
+  ownSuggestion?: { suggestionId: string; commentThreadId: string };
 }
 
 interface ReplaceChange {
@@ -48,6 +54,8 @@ interface ReplaceChange {
   insertTo: number;
   oldText: string;
   newText: string;
+  /** Set when the deleted (old) text was entirely within a suggestionInsert mark owned by the current user. */
+  ownSuggestion?: { suggestionId: string; commentThreadId: string };
 }
 
 /** Serialised representation of a single text node's marks (excluding suggestion marks). */
@@ -298,6 +306,101 @@ function detectTableChanges(
 }
 
 // ---------------------------------------------------------------------------
+// Own-suggestion detection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if the text range [from, from+textLength] in `doc` is entirely covered by
+ * a single suggestionInsert mark owned by `userId`. Returns the mark's suggestionId
+ * and commentThreadId if so, undefined otherwise.
+ */
+function getOwnSuggestionInsertMark(
+  doc: ProseMirrorNode,
+  from: number,
+  textLength: number,
+  userId: string
+): { suggestionId: string; commentThreadId: string } | undefined {
+  let detectedSuggestionId: string | null = null;
+  let detectedThreadId: string | null = null;
+  let allInOwnSuggestion = true;
+
+  doc.nodesBetween(from, from + textLength, (node, pos) => {
+    if (!allInOwnSuggestion) return false;
+    if (!node.isText || !node.text) return true;
+
+    const nodeStart = Math.max(pos, from);
+    const nodeEnd = Math.min(pos + node.nodeSize, from + textLength);
+    if (nodeStart >= nodeEnd) return true;
+
+    const ownMark = node.marks.find(
+      (m) => m.type.name === "suggestionInsert" && m.attrs.userId === userId
+    );
+
+    if (!ownMark) {
+      allInOwnSuggestion = false;
+      return false;
+    }
+
+    const sid = ownMark.attrs.suggestionId as string;
+    const tid = ownMark.attrs.commentThreadId as string;
+
+    if (detectedSuggestionId === null) {
+      detectedSuggestionId = sid;
+      detectedThreadId = tid;
+    } else if (detectedSuggestionId !== sid) {
+      // Spans multiple different suggestions — treat as regular change
+      allInOwnSuggestion = false;
+      return false;
+    }
+    return true;
+  });
+
+  if (allInOwnSuggestion && detectedSuggestionId !== null && detectedThreadId !== null) {
+    return { suggestionId: detectedSuggestionId, commentThreadId: detectedThreadId };
+  }
+  return undefined;
+}
+
+/**
+ * Get the current commentThreadId for a suggestion mark from the doc
+ * (may differ from what was captured during change extraction if the temp ID was swapped out).
+ */
+function getSuggestionCommentThreadId(doc: ProseMirrorNode, suggestionId: string): string | null {
+  let result: string | null = null;
+  doc.descendants((node) => {
+    if (result) return false;
+    if (node.isText) {
+      const mark = node.marks.find(
+        (m) => m.type.name === "suggestionInsert" && m.attrs.suggestionId === suggestionId
+      );
+      if (mark) {
+        result = mark.attrs.commentThreadId as string;
+        return false;
+      }
+    }
+    return true;
+  });
+  return result;
+}
+
+/**
+ * Collect all text in the doc that is covered by a suggestionInsert mark with the given suggestionId.
+ */
+function getSuggestionInsertText(doc: ProseMirrorNode, suggestionId: string): string {
+  let text = "";
+  doc.descendants((node) => {
+    if (node.isText && node.text) {
+      const hasMark = node.marks.some(
+        (m) => m.type.name === "suggestionInsert" && m.attrs.suggestionId === suggestionId
+      );
+      if (hasMark) text += node.text;
+    }
+    return true;
+  });
+  return text;
+}
+
+// ---------------------------------------------------------------------------
 // Position mapping
 // ---------------------------------------------------------------------------
 
@@ -392,7 +495,15 @@ function mergeDocChanges(changes: DocChange[]): DocChange[] {
     // Merge backspace-like deletes: after mapping, they typically converge on the same insertion point.
     // When that happens, prepend the newer deleted text (it was deleted closer to the start).
     if (prev.type === "delete" && change.type === "delete" && prev.from === change.from) {
+      // Only preserve ownSuggestion if both deletes target the same suggestion
+      const mergedOwnSuggestion =
+        prev.ownSuggestion &&
+        change.ownSuggestion &&
+        prev.ownSuggestion.suggestionId === change.ownSuggestion.suggestionId
+          ? prev.ownSuggestion
+          : undefined;
       prev.text = change.text + prev.text;
+      prev.ownSuggestion = mergedOwnSuggestion;
       continue;
     }
 
@@ -428,7 +539,7 @@ function mergeDocChanges(changes: DocChange[]): DocChange[] {
 // Extract changes from a transaction
 // ---------------------------------------------------------------------------
 
-function extractChangesFromTransaction(tr: Transaction): DocChange[] {
+function extractChangesFromTransaction(tr: Transaction, userId?: string): DocChange[] {
   const changes: DocChange[] = [];
 
   let docBeforeStep: ProseMirrorNode = tr.before;
@@ -547,6 +658,10 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         const insertFrom = mapFromAfterStepToEnd.map(newFrom, 1);
         const insertTo = mapFromAfterStepToEnd.map(newTo, -1);
 
+        const ownSuggestion = userId
+          ? getOwnSuggestionInsertMark(docBeforeStep, from, deletedText.length, userId)
+          : undefined;
+
         changes.push({
           type: "replace",
           from: deletePos,
@@ -554,6 +669,7 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
           insertTo,
           oldText: deletedText,
           newText: insertedText,
+          ...(ownSuggestion ? { ownSuggestion } : {}),
         });
         return;
       }
@@ -563,11 +679,17 @@ function extractChangesFromTransaction(tr: Transaction): DocChange[] {
         anyTextChange = true;
         const mapFromBeforeStepToEnd = tr.mapping.slice(stepIndex);
         const deletePos = mapFromBeforeStepToEnd.map(from, 1);
+
+        const ownSuggestion = userId
+          ? getOwnSuggestionInsertMark(docBeforeStep, from, deletedText.length, userId)
+          : undefined;
+
         changes.push({
           type: "delete",
           from: deletePos,
           to: deletePos,
           text: deletedText,
+          ...(ownSuggestion ? { ownSuggestion } : {}),
         });
       }
 
@@ -623,7 +745,8 @@ function createSuggestionsForChanges(
   view: EditorView,
   changes: DocChange[],
   userId: string,
-  onCreateSuggestion?: SuggestionModeOptions['onCreateSuggestion']
+  onCreateSuggestion?: SuggestionModeOptions['onCreateSuggestion'],
+  onUpdateSuggestion?: SuggestionModeOptions['onUpdateSuggestion']
 ): void {
   const tr = view.state.tr;
   tr.setMeta('suggestionMode', true);
@@ -641,6 +764,9 @@ function createSuggestionsForChanges(
 
   const schema = view.state.schema;
 
+  // Track suggestion IDs whose marks were edited by the owner — update thread after dispatch.
+  const ownSuggestionUpdates = new Set<string>();
+
   // IMPORTANT: apply insert marks before inserting delete-suggestion text.
   // Inserting deleted text shifts document positions; marking first ensures marks stay attached.
   const replaceChanges = changes.filter((c) => c.type === "replace") as ReplaceChange[];
@@ -653,6 +779,37 @@ function createSuggestionsForChanges(
 
   // ------- Replace changes -------
   replaceChanges.forEach((change) => {
+    if (change.ownSuggestion) {
+      // The deleted text was within the user's own suggestionInsert mark.
+      // Apply the original suggestion mark to the new text range (instead of creating a new suggestion).
+      const { suggestionId } = change.ownSuggestion;
+      // Use the current commentThreadId from the doc (may have been updated from temp-)
+      const currentThreadId =
+        getSuggestionCommentThreadId(view.state.doc, suggestionId) ??
+        change.ownSuggestion.commentThreadId;
+
+      const originalMark = suggestionInsertType.create({
+        suggestionId,
+        userId,
+        commentThreadId: currentThreadId,
+        timestamp: Date.now(),
+      });
+
+      console.log('[SuggestionMode] Updating own suggestion via replace:', {
+        suggestionId,
+        insertFrom: change.insertFrom,
+        insertTo: change.insertTo,
+        newText: change.newText.substring(0, 50),
+      });
+
+      // Apply the original mark to the newly typed text so it belongs to the same suggestion.
+      tr.addMark(change.insertFrom, change.insertTo, originalMark);
+
+      // Queue an update to the thread text (computed after dispatch when doc is final).
+      ownSuggestionUpdates.add(suggestionId);
+      return;
+    }
+
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
     const commentThreadId = `temp-${suggestionId}`;
@@ -810,6 +967,17 @@ function createSuggestionsForChanges(
 
   // ------- Delete changes -------
   deleteChanges.forEach((change) => {
+    if (change.ownSuggestion) {
+      // The deleted text was within the user's own suggestionInsert mark.
+      // The deletion already happened naturally — just queue a thread text update.
+      console.log('[SuggestionMode] Skipping delete mark for own suggestion:', {
+        suggestionId: change.ownSuggestion.suggestionId,
+        deletedText: change.text.substring(0, 50),
+      });
+      ownSuggestionUpdates.add(change.ownSuggestion.suggestionId);
+      return;
+    }
+
     const suggestionId = generateSuggestionId();
     const timestamp = Date.now();
     const commentThreadId = `temp-${suggestionId}`;
@@ -989,6 +1157,18 @@ function createSuggestionsForChanges(
   // Dispatch the transaction with suggestions
   console.log('[SuggestionMode] Dispatching transaction with suggestions');
   view.dispatch(tr);
+
+  // After dispatch, view.state.doc reflects the updated marks.
+  // Fire update callbacks for own-suggestion edits now that we can compute the final text.
+  if (ownSuggestionUpdates.size > 0 && onUpdateSuggestion) {
+    ownSuggestionUpdates.forEach((suggestionId) => {
+      const newText = getSuggestionInsertText(view.state.doc, suggestionId);
+      console.log('[SuggestionMode] Updating own suggestion thread:', { suggestionId, newText });
+      onUpdateSuggestion({ suggestionId, newText }).catch((error: unknown) => {
+        console.error('[SuggestionMode] Failed to update suggestion thread:', error);
+      });
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,12 +1183,13 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
       isOwner: true,
       userId: "",
       onCreateSuggestion: undefined,
+      onUpdateSuggestion: undefined,
       onPendingChange: undefined,
     };
   },
 
   addProseMirrorPlugins() {
-    const { isOwner, userId, onCreateSuggestion, onPendingChange } = this.options;
+    const { isOwner, userId, onCreateSuggestion, onUpdateSuggestion, onPendingChange } = this.options;
 
     // If user is owner, no need to track changes
     if (isOwner) {
@@ -1086,7 +1267,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 ? ([] as DocChange[])
                 : pluginState.pendingChanges.map((c: DocChange) => mapDocChange(c, tr.mapping));
 
-              const extractedChanges = extractChangesFromTransaction(tr);
+              const extractedChanges = extractChangesFromTransaction(tr, userId);
               const pendingChanges = mergeDocChanges([
                 ...mappedExistingChanges,
                 ...extractedChanges,
@@ -1143,7 +1324,7 @@ export const SuggestionMode = Extension.create<SuggestionModeOptions>({
                 }
                 
                 console.log('[SuggestionMode] Creating suggestions for detected changes');
-                createSuggestionsForChanges(view, changes, userId, onCreateSuggestion);
+                createSuggestionsForChanges(view, changes, userId, onCreateSuggestion, onUpdateSuggestion);
                 
               }, 1000); // 1 second debounce
               
