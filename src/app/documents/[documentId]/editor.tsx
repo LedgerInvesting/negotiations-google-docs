@@ -387,7 +387,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
     const syncResult = () => {
       if (viewMode === "result") {
         const content = cleanDocumentJSON(editor.getJSON());
-        resultEditor.commands.setContent(content, false);
+        resultEditor.commands.setContent(content, { emitUpdate: false });
       }
     };
 
