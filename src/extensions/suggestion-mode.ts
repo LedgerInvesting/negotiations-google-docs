@@ -619,7 +619,43 @@ function extractChangesFromTransaction(tr: Transaction, userId?: string): DocCha
     }
 
     // ---------------------------------------------------------------
-    // Content replacement steps (typing, pasting, deleting)
+    // ReplaceAroundStep — block-level changes (setNodeMarkup, wrapIn, lift).
+    // These never modify text content, so skip the stepMap text-detection loop
+    // and go directly to node format detection.  (Using the stepMap forEach for
+    // ReplaceAroundStep would produce wrong newTo bounds that bleed into the next
+    // paragraph, incorrectly setting anyTextChange = true and hiding the change.)
+    // ---------------------------------------------------------------
+    if (step instanceof ReplaceAroundStep) {
+      const aroundResult = step.apply(docBeforeStep);
+      if (!aroundResult.doc) {
+        console.warn("[SuggestionMode] ReplaceAroundStep apply failed, skipping", aroundResult.failed);
+        return;
+      }
+      const docAfterAround = aroundResult.doc;
+
+      if (!docBeforeStep.eq(docAfterAround)) {
+        const finalMapping = tr.mapping.slice(stepIndex + 1);
+        const stepMap = step.getMap();
+
+        const nodeChanges = detectNodeFormatChanges(docBeforeStep, docAfterAround, step.from, step.to, finalMapping);
+        if (nodeChanges.length > 0) {
+          console.log('[SuggestionMode] Detected', nodeChanges.length, 'node format change(s):', nodeChanges.map(c => c.description));
+          changes.push(...nodeChanges);
+        }
+
+        const tableChanges = detectTableChanges(docBeforeStep, docAfterAround, stepMap, finalMapping);
+        if (tableChanges.length > 0) {
+          console.log('[SuggestionMode] Detected', tableChanges.length, 'table change(s):', tableChanges.map(c => c.type));
+          changes.push(...tableChanges);
+        }
+      }
+
+      docBeforeStep = docAfterAround;
+      return;
+    }
+
+    // ---------------------------------------------------------------
+    // ReplaceStep — content changes (typing, pasting, deleting)
     // ---------------------------------------------------------------
     const result = step.apply(docBeforeStep);
     if (!result.doc) {
