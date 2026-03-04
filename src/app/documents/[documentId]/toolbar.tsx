@@ -572,9 +572,11 @@ const ToolbarButton = ({
 };
 
 export const Toolbar = () => {
-  const { editor } = useEditorStore();
+  const { editor, viewMode } = useEditorStore();
   const currentUser = useSelf();
   const isOwner = currentUser?.info?.isOwner === true;
+
+  if (viewMode === "result") return null;
 
   const sections: {
     label: string;
@@ -676,7 +678,7 @@ export const Toolbar = () => {
       <Separator orientation="vertical" className="h-6 bg-neutral-300" />
       <LinkButton />
       <ImageButton />
-      <AlignButton />
+      {isOwner && <AlignButton />}
       <LineHeightButton />
       <ListButton />
       {sections[2].filter(item => !item.ownerOnly || isOwner).map((item) => (
