@@ -412,7 +412,7 @@ export const Editor = ({ initialContent }: EditorProps) => {
     <div className="size-full overflow-x-auto bg-editor-bg px-4 print:p-0 print:bg-white print:overflow-visible">
       <div className="flex justify-center print:py-0 mx-auto print:w-full print:min-w-0">
         <div className="min-w-max w-[816px]">
-          <Ruler />
+          {viewMode !== "result" && <Ruler />}
           <div className="relative py-4 print:py-0">
             {/* Suggestion pending indicator - shown during 1.5s debounce */}
             {!isOwner && isSuggestionPending && viewMode === "suggestion" && (
